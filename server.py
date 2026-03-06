@@ -310,6 +310,51 @@ LIMIT {params.limit}
         return handle_error(e)
 
 
+def _format_law_detail(
+    b: dict, sr: str, lang: str, suffix: str, successor: dict | None = None,
+) -> str:
+    """Formatiert die Detailansicht eines Erlasses als Markdown."""
+    uri = val(b, "ca")
+    title = val(b, "title", "(kein Titel)")
+    short = val(b, "titleShort", "–")
+    sr_num = val(b, "srNumber", sr)
+    status_uri = val(b, "inForceStatus")
+    entry_date = val(b, "entryDate", "–")
+    url = fedlex_url(uri, lang)
+    st = status_label(status_uri) if status_uri else "–"
+
+    out = f"## SR {sr_num}: {title}\n\n"
+    out += "| Feld | Wert |\n|---|---|\n"
+    out += f"| **Vollständiger Titel** | {title} |\n"
+    out += f"| **Abkürzung** | {short} |\n"
+    out += f"| **SR-Nummer** | {sr_num} |\n"
+    out += f"| **Status** | {st} |\n"
+    out += f"| **Inkrafttreten (aktuelle Fassung)** | {entry_date} |\n"
+    out += f"| **Sprache** | {lang.upper()} |\n"
+    out += f"\n**Direktlink:** [{url}]({url})\n"
+    out += f"\n**Daten-URI:** `{uri}`\n"
+
+    if successor:
+        s_uri = val(successor, "ca")
+        s_title = val(successor, "title", "(kein Titel)")
+        s_short = val(successor, "titleShort", "–")
+        s_sr = val(successor, "srNumber", "–")
+        s_entry = val(successor, "entryDate", "–")
+        s_url = fedlex_url(s_uri, lang)
+        out += f"\n---\n### ⚠️ Nachfolge-Erlass (in Kraft)\n\n"
+        out += "| Feld | Wert |\n|---|---|\n"
+        out += f"| **Vollständiger Titel** | {s_title} |\n"
+        out += f"| **Abkürzung** | {s_short} |\n"
+        if s_sr != "–":
+            out += f"| **SR-Nummer** | {s_sr} |\n"
+        out += f"| **Inkrafttreten** | {s_entry} |\n"
+        out += f"| **Status** | ✅ In Kraft |\n"
+        out += f"\n**Direktlink:** [{s_url}]({s_url})\n"
+
+    out += FEDLEX_SOURCE
+    return out
+
+
 @mcp.tool(
     name="fedlex_get_law_by_sr",
     annotations={
@@ -351,7 +396,7 @@ SELECT DISTINCT ?ca ?title ?titleShort ?srNumber ?inForceStatus ?entryDate WHERE
   FILTER(STRENDS(STR(?expr), "{suffix}"))
   FILTER(STR(?srNumber) = "{sr}")
 }} ORDER BY DESC(?entryDate)
-LIMIT 3
+LIMIT 10
 """
 
     try:
@@ -366,28 +411,40 @@ LIMIT 3
                 "- Erlass aufgehoben (mit `in_force_only=false` in `fedlex_search_laws` suchen)"
             )
 
-        b = bindings[0]
-        uri = val(b, "ca")
-        title = val(b, "title", "(kein Titel)")
-        short = val(b, "titleShort", "–")
-        sr_num = val(b, "srNumber", sr)
+        # Bevorzuge den gültigen Erlass (In Kraft) gegenüber aufgehobenen Fassungen,
+        # da mehrere ConsolidationAbstract-Einträge dieselbe SR-Nummer teilen können
+        # (z.B. altes DSG von 1992 und revidiertes nDSG von 2020 unter SR 235.1).
+        in_force = [b for b in bindings if val(b, "inForceStatus") == STATUS_IN_FORCE]
+        b = in_force[0] if in_force else bindings[0]
         status_uri = val(b, "inForceStatus")
-        entry_date = val(b, "entryDate", "–")
-        url = fedlex_url(uri, lang)
-        st = status_label(status_uri) if status_uri else "–"
 
-        out = f"## SR {sr_num}: {title}\n\n"
-        out += "| Feld | Wert |\n|---|---|\n"
-        out += f"| **Vollständiger Titel** | {title} |\n"
-        out += f"| **Abkürzung** | {short} |\n"
-        out += f"| **SR-Nummer** | {sr_num} |\n"
-        out += f"| **Status** | {st} |\n"
-        out += f"| **Inkrafttreten (aktuelle Fassung)** | {entry_date} |\n"
-        out += f"| **Sprache** | {lang.upper()} |\n"
-        out += f"\n**Direktlink:** [{url}]({url})\n"
-        out += f"\n**Daten-URI:** `{uri}`\n"
-        out += FEDLEX_SOURCE
-        return out
+        # Wenn der Erlass nicht mehr in Kraft ist, Nachfolge-Erlass suchen.
+        # Einige revidierte Erlasse (z.B. nDSG 2020) haben in Fedlex keine
+        # historicalLegalId, sind aber über den Kurztitel (titleShort) auffindbar.
+        successor = None
+        if status_uri == STATUS_NO_LONGER_FORCE:
+            short_name = val(b, "titleShort")
+            if short_name:
+                succ_query = f"""
+PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
+SELECT DISTINCT ?ca ?title ?titleShort ?srNumber ?inForceStatus ?entryDate WHERE {{
+  ?ca a jolux:ConsolidationAbstract ;
+      jolux:isRealizedBy ?expr ;
+      jolux:inForceStatus <{STATUS_IN_FORCE}> .
+  ?expr jolux:title ?title ;
+        jolux:titleShort ?titleShort .
+  OPTIONAL {{ ?expr jolux:historicalLegalId ?srNumber . }}
+  OPTIONAL {{ ?ca jolux:dateEntryInForce ?entryDate . }}
+  FILTER(STRENDS(STR(?expr), "{suffix}"))
+  FILTER(STRSTARTS(STR(?ca), "https://fedlex.data.admin.ch/eli/cc/"))
+  FILTER(STR(?titleShort) = "{short_name}")
+}} LIMIT 1
+"""
+                succ_bindings = await run_sparql(succ_query)
+                if succ_bindings:
+                    successor = succ_bindings[0]
+
+        return _format_law_detail(b, sr, lang, suffix, successor)
 
     except Exception as e:
         return handle_error(e)
