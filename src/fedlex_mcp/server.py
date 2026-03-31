@@ -24,7 +24,7 @@ Transport: Dual — stdio (lokal) und SSE (Cloud/Render.com)
 """
 
 import json
-import os
+import sys
 from datetime import date, timedelta
 from enum import Enum
 from typing import Optional
@@ -871,19 +871,15 @@ async def get_server_info() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Einstiegspunkt — Dual Transport
+# Entry point — Dual Transport
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    """Einstiegspunkt für CLI-Installation via pip/uvx."""
-    transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    port = int(os.environ.get("PORT", "8000"))
-
-    if transport == "sse":
-        mcp.run(transport="sse", port=port)
-    else:
-        mcp.run(transport="stdio")
-
-
 if __name__ == "__main__":
-    main()
+    if "--http" in sys.argv:
+        port = 8000
+        for i, arg in enumerate(sys.argv):
+            if arg == "--port" and i + 1 < len(sys.argv):
+                port = int(sys.argv[i + 1])
+        mcp.run(transport="streamable-http", port=port)
+    else:
+        mcp.run()

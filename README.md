@@ -1,194 +1,281 @@
-# Fedlex MCP Server
+> :switzerland: **Part of the [Swiss Public Data MCP Portfolio](https://github.com/malkreide)**
 
-**Zugriff auf das Schweizer Bundesrecht via Claude Desktop oder Claude.ai**
+# :balance_scale: fedlex-mcp
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![MCP](https://img.shields.io/badge/MCP-1.3+-green.svg)](https://modelcontextprotocol.io/)
-[![Lizenz](https://img.shields.io/badge/Lizenz-MIT-lightgrey.svg)](LICENSE)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-purple)](https://modelcontextprotocol.io/)
+[![No Auth Required](https://img.shields.io/badge/auth-none%20required-brightgreen)](https://github.com/malkreide/fedlex-mcp)
+![CI](https://github.com/malkreide/fedlex-mcp/actions/workflows/ci.yml/badge.svg)
 
----
+> MCP Server for Swiss federal law — search the SR, monitor legal changes, and query BBl/treaties via Claude Desktop or Claude.ai
 
-## Was ist das?
-
-Dieser MCP-Server verbindet KI-Assistenten (Claude) mit dem **Fedlex SPARQL-Endpoint** der Schweizerischen Bundeskanzlei. Damit können KI-Agenten direkt im Gespräch Schweizer Bundesrecht nachschlagen, Rechtsänderungen überwachen und Gesetze analysieren — ohne manuelle Recherche auf fedlex.admin.ch.
-
-**Metapher:** USB-C für Bundesrecht. Einmal angeschlossen, kann Claude jederzeit in die Systematische Rechtssammlung «greifen».
-
----
-
-## Tools (7)
-
-| Tool | Beschreibung |
-|---|---|
-| `fedlex_search_laws` | Erlasse der SR nach Stichwort im Titel suchen |
-| `fedlex_get_law_by_sr` | Erlass nach SR-Nummer abrufen (z.B. `235.1` = DSG) |
-| `fedlex_get_recent_publications` | Neueste Publikationen der Amtlichen Sammlung (AS) |
-| `fedlex_get_upcoming_changes` | Erlasse, die bald in Kraft treten (Rechtsmonitoring) |
-| `fedlex_search_gazette` | Im Bundesblatt (BBl) suchen |
-| `fedlex_get_law_history` | Alle Fassungen eines Erlasses (Versionsgeschichte) |
-| `fedlex_search_treaties` | Staatsverträge (SR-Nummern beginnen mit `0.`) |
+[:de: Deutsche Version](README.de.md)
 
 ---
 
-## Anwendungsbeispiele
+## Overview
 
-```
-"Zeig mir alle gültigen Bundesgesetze zur Berufsbildung"
-→ fedlex_search_laws(keywords="Berufsbildung")
+`fedlex-mcp` connects AI assistants (Claude) with the **Fedlex SPARQL endpoint** of the Swiss Federal Chancellery. This enables AI agents to look up Swiss federal law, monitor legal changes, and analyse legislation directly in conversation — without manual research on fedlex.admin.ch.
 
-"Was steht im Datenschutzgesetz? Ist es noch in Kraft?"
-→ fedlex_get_law_by_sr(sr_number="235.1")
+**Metaphor:** USB-C for federal law. Once connected, Claude can reach into the Systematic Compilation at any time.
 
-"Welche Bundesgesetze treten in den nächsten 3 Monaten in Kraft?"
-→ fedlex_get_upcoming_changes(days_ahead=90)
+---
 
-"Was hat der Bundesrat diese Woche im Bundesblatt publiziert?"
-→ fedlex_get_recent_publications(days=7)
+## Features
 
-"Zeig mir die Versionsgeschichte des DSG — wann trat die Revision in Kraft?"
-→ fedlex_get_law_history(sr_number="235.1")
+- :balance_scale: **7 tools, 2 resources** covering the full breadth of Swiss federal law
+- :mag: **SPARQL-powered** — direct access to the Fedlex linked data endpoint
+- :globe_with_meridians: **4 languages** — German, French, Italian, Romansh
+- :unlock: **No API key required** — all data under open reuse licence
+- :cloud: **Dual transport** — stdio (Claude Desktop) + Streamable HTTP (cloud)
 
-"Welche Bildungsabkommen hat die Schweiz mit der EU?"
-→ fedlex_search_treaties(keywords="Bildung")
-```
+---
+
+## Prerequisites
+
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
 ---
 
 ## Installation
 
-### Voraussetzungen
-- Python 3.11+
-- `uv` oder `pip`
-
-### Lokal (Claude Desktop)
-
 ```bash
-# 1. Repository klonen
+# Clone the repository
 git clone https://github.com/malkreide/fedlex-mcp.git
 cd fedlex-mcp
 
-# 2. Abhängigkeiten installieren
-pip install -r requirements.txt
-
-# 3. Direkt testen
-python server.py
+# Install
+pip install -e .
+# or with uv:
+uv pip install -e .
 ```
 
-### Claude Desktop Konfiguration
+Or with `uvx` (no permanent installation):
 
-Datei öffnen:
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+```bash
+uvx fedlex-mcp
+```
 
-Eintrag hinzufügen:
+---
+
+## Quickstart
+
+```bash
+# stdio (for Claude Desktop)
+python -m fedlex_mcp.server
+
+# Streamable HTTP (port 8000)
+python -m fedlex_mcp.server --http --port 8000
+```
+
+Try it immediately in Claude Desktop:
+
+> *"Show me all valid federal laws on vocational training"*
+> *"What does the Data Protection Act say? Is it still in force?"*
+> *"Which federal laws enter into force in the next 3 months?"*
+
+---
+
+## Configuration
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
     "fedlex": {
       "command": "python",
-      "args": ["/absoluter/pfad/zu/fedlex-mcp/server.py"]
+      "args": ["-m", "fedlex_mcp.server"]
     }
   }
 }
 ```
 
-Mit `uvx` (empfohlen, kein manuelles Install):
+Or with `uvx`:
 
 ```json
 {
   "mcpServers": {
     "fedlex": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/malkreide/fedlex-mcp", "fedlex-mcp"]
+      "args": ["fedlex-mcp"]
     }
   }
 }
 ```
 
-Claude Desktop neu starten. Im Chat erscheinen danach 7 neue Tools (Hammer-Icon).
+**Config file locations:**
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+### Cloud Deployment (SSE for browser access)
+
+For use via **claude.ai in the browser** (e.g. on managed workstations without local software):
+
+**Render.com (recommended):**
+1. Push/fork the repository to GitHub
+2. On [render.com](https://render.com): New Web Service -> connect GitHub repo
+3. Set start command: `python -m fedlex_mcp.server --http --port 8000`
+4. In claude.ai under Settings -> MCP Servers, add: `https://your-app.onrender.com/sse`
+
+> *"stdio for the developer laptop, SSE for the browser."*
 
 ---
 
-## Cloud-Deployment (Render.com / SSE)
+## Available Tools
 
-Für Zugriff via Browser oder ohne lokale Installation:
+| Tool | Description |
+|------|-------------|
+| `fedlex_search_laws` | Search the Systematic Compilation (SR) by keyword in title |
+| `fedlex_get_law_by_sr` | Get a law by its SR number (e.g. `235.1` = Data Protection Act) |
+| `fedlex_get_recent_publications` | Latest publications from the Official Compilation (AS) |
+| `fedlex_get_upcoming_changes` | Laws entering into force soon (legal monitoring) |
+| `fedlex_search_gazette` | Search the Federal Gazette (BBl) |
+| `fedlex_get_law_history` | All versions of a law (version history) |
+| `fedlex_search_treaties` | International treaties (SR numbers starting with `0.`) |
 
-```bash
-# Server starten (SSE-Transport)
-MCP_TRANSPORT=sse PORT=8000 python server.py
-```
+### Example Use Cases
 
-`render.yaml` Beispiel:
-
-```yaml
-services:
-  - type: web
-    name: fedlex-mcp
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python server.py
-    envVars:
-      - key: MCP_TRANSPORT
-        value: sse
-      - key: PORT
-        value: 10000
-```
+| Query | Tool |
+|-------|------|
+| *"Show me all valid federal laws on vocational training"* | `fedlex_search_laws` |
+| *"What does the Data Protection Act say?"* | `fedlex_get_law_by_sr` |
+| *"Which laws enter into force in the next 3 months?"* | `fedlex_get_upcoming_changes` |
+| *"What did the Federal Council publish this week?"* | `fedlex_get_recent_publications` |
+| *"Show me the version history of the DSG"* | `fedlex_get_law_history` |
+| *"Which education treaties does Switzerland have with the EU?"* | `fedlex_search_treaties` |
 
 ---
 
-## Datenmodell (JOLux-Ontologie)
+## Architecture
 
 ```
-jolux:ConsolidationAbstract  ←  SR-Eintrag
-  └─ jolux:isRealizedBy  →  jolux:Expression (URI endet auf /de, /fr, /it, /rm)
-     ├─ jolux:title               "Bundesgesetz vom 19. Juni 1992 über den Datenschutz"
-     ├─ jolux:titleShort          "DSG"
-     └─ jolux:historicalLegalId   "235.1"
++-------------------+     +------------------------------+     +--------------------------+
+|   Claude / AI     |---->|  Fedlex MCP                  |---->|  Fedlex SPARQL Endpoint  |
+|   (MCP Host)      |<----|  (MCP Server)                |<----|  (Swiss Federal          |
++-------------------+     |                              |     |   Chancellery)           |
+                          |  7 Tools . 2 Resources       |     +--------------------------+
+                          |  Stdio | SSE                 |
+                          |                              |
+                          |  No authentication required  |
+                          +------------------------------+
+```
+
+### Data Model (JOLux Ontology)
+
+```
+jolux:ConsolidationAbstract  <-  SR entry
+  +-- jolux:isRealizedBy  ->  jolux:Expression (URI ends in /de, /fr, /it, /rm)
+     +-- jolux:title               "Federal Act of 19 June 1992 on Data Protection"
+     +-- jolux:titleShort          "DSG"
+     +-- jolux:historicalLegalId   "235.1"
 
 jolux:inForceStatus:
-  .../0  ✅ In Kraft
-  .../1  ⚠️ Nicht mehr in SR publiziert
-  .../3  ❌ Nicht mehr in Kraft
+  .../0  In force
+  .../1  No longer published in the SR
+  .../3  No longer in force
 ```
 
-**SPARQL-Endpoint:** `https://fedlex.data.admin.ch/sparqlendpoint`  
-**Lizenz:** Freie Wiederverwendung (kommerziell und andere Zwecke) gemäss [fedlex.admin.ch/de/broadcasters](https://www.fedlex.admin.ch/de/broadcasters)
+**SPARQL Endpoint:** `https://fedlex.data.admin.ch/sparqlendpoint`
+**Licence:** Free reuse (commercial and other purposes) per [fedlex.admin.ch](https://www.fedlex.admin.ch/de/broadcasters)
 
 ---
 
-## Sprachen
+## Languages
 
-| Code | Sprache |
-|---|---|
-| `de` | Deutsch (Standard, vollständigste Abdeckung) |
-| `fr` | Français |
-| `it` | Italiano |
-| `rm` | Rumantsch |
-
----
-
-## Sicherheitshinweise
-
-- Dieser Server ist **read-only** — keine schreibenden Operationen
-- Alle Abfragen gehen direkt an den öffentlichen Fedlex-Endpoint
-- Keine API-Keys oder Authentifizierung erforderlich
-- Datensouveränität: Keine Daten werden an Dritte übertragen
+| Code | Language |
+|------|----------|
+| `de` | German (default, most complete coverage) |
+| `fr` | French |
+| `it` | Italian |
+| `rm` | Romansh |
 
 ---
 
-## Verwandte Projekte
+## Project Structure
 
-- [Zurich Open Data MCP](https://github.com/malkreide/zurich-opendata-mcp) — Daten der Stadt Zürich
-- [Swiss Transport MCP](https://github.com/malkreide/swiss-transport-mcp) — Öffentlicher Verkehr CH
-- [Patent Research MCP](https://github.com/malkreide/patent-mcp) — EPO/IGE Patentdatenbanken
+```
+fedlex-mcp/
++-- src/fedlex_mcp/
+|   +-- __init__.py              # Package
+|   +-- server.py                # 7 tools, 2 resources
++-- tests/
+|   +-- test_server.py           # Unit tests (mocked)
++-- .github/workflows/ci.yml     # GitHub Actions (Python 3.11/3.12/3.13)
++-- pyproject.toml
++-- CHANGELOG.md
++-- CONTRIBUTING.md
++-- LICENSE
++-- README.md                    # This file (English)
++-- README.de.md                 # German version
+```
 
 ---
 
-## Entwickelt von
+## Known Limitations
 
-Hayal Hayal | GitHub: [@malkreide](https://github.com/malkreide)
+- **SPARQL complexity:** Very broad keyword searches may time out (45s timeout)
+- **Language coverage:** German has the most complete data; other languages may have gaps
+- **Historical data:** Not all historical versions of laws have machine-readable metadata
+- **Rate limiting:** The Fedlex endpoint may throttle high-frequency requests
 
 ---
 
-*English summary: MCP server providing access to Swiss federal law via the Fedlex SPARQL endpoint. 7 tools covering the Systematic Compilation (SR), Official Gazette, Federal Bulletin, version history, and international treaties. Read-only, no authentication required, dual transport (stdio + SSE).*
+## Testing
+
+```bash
+# Unit tests (no API key required)
+PYTHONPATH=src pytest tests/ -m "not live"
+
+# Integration tests (live API calls)
+pytest tests/ -m "live"
+```
+
+---
+
+## Security
+
+- This server is **read-only** — no write operations
+- All queries go directly to the public Fedlex endpoint
+- No API keys or authentication required
+- Data sovereignty: no data is transmitted to third parties
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md)
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md)
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE)
+
+---
+
+## Author
+
+Hayal Oezkan . [malkreide](https://github.com/malkreide)
+
+---
+
+## Credits & Related Projects
+
+- **Fedlex:** [fedlex.admin.ch](https://www.fedlex.admin.ch/) — Swiss Federal Chancellery
+- **Protocol:** [Model Context Protocol](https://modelcontextprotocol.io/) — Anthropic / Linux Foundation
+- **Related:** [swiss-cultural-heritage-mcp](https://github.com/malkreide/swiss-cultural-heritage-mcp) — Swiss cultural heritage data
+- **Related:** [zurich-opendata-mcp](https://github.com/malkreide/zurich-opendata-mcp) — City of Zurich open data
+- **Related:** [swiss-transport-mcp](https://github.com/malkreide/swiss-transport-mcp) — Swiss public transport
+- **Portfolio:** [Swiss Public Data MCP Portfolio](https://github.com/malkreide)

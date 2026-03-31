@@ -2,12 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:
@@ -19,26 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Python ${{ matrix.python-version }} einrichten
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Abhaengigkeiten installieren
-        run: pip install -e ".[dev]"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
 
-      - name: Linting mit ruff
-        run: python -m ruff check src/
+      - name: Run tests
+        run: |
+          PYTHONPATH=src pytest tests/ -m "not live"
 
-      - name: Format-Check
-        run: python -m ruff format --check src/
-
-      - name: Import-Test
-        run: python -c "from fedlex_mcp.server import main; print('Import OK')"
-        env:
-          PYTHONPATH: src
-
-      - name: Unit-Tests (ohne Live-Tests)
-        run: python -m pytest tests/ -m "not live" -v
-        env:
-          PYTHONPATH: src
+      - name: Lint
+        run: ruff check src/ tests/

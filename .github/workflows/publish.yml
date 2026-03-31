@@ -4,12 +4,6 @@ on:
   release:
     types: [published]
 
-permissions:
-  id-token: write
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build:
     name: Build distribution
@@ -21,7 +15,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install build tools
         run: pip install build
@@ -29,7 +23,7 @@ jobs:
       - name: Build package
         run: python -m build
 
-      - name: Upload build artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -42,9 +36,11 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/fedlex-mcp/
+    permissions:
+      id-token: write
 
     steps:
-      - name: Download build artifacts
+      - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: dist
