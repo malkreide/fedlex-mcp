@@ -156,6 +156,8 @@ Fuer den Einsatz via **claude.ai im Browser** (z.B. auf verwalteten Arbeitsplaet
 | *"Zeig mir die Versionsgeschichte des DSG"* | `fedlex_get_law_history` |
 | *"Welche Bildungsabkommen hat die Schweiz mit der EU?"* | `fedlex_search_treaties` |
 
+→ Weitere Anwendungsbeispiele nach Zielgruppe →
+
 ---
 
 ## Architektur

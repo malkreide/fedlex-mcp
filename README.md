@@ -156,6 +156,8 @@ For use via **claude.ai in the browser** (e.g. on managed workstations without l
 | *"Show me the version history of the DSG"* | `fedlex_get_law_history` |
 | *"Which education treaties does Switzerland have with the EU?"* | `fedlex_search_treaties` |
 
+→ More use cases by audience →
+
 ---
 
 ## Architecture
