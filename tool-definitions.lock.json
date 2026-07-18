@@ -1,14 +1,19 @@
 {
-  "sha256": "b6e0eb969b6fd7d32962167adedb463c3074c6f613e7d8be7d1d19fd7e086ee6",
-  "tool_count": 7,
+  "sha256": "4590b8ca697e0376cd90c2a7dfd6ea89cb2649c903dea260d5af253fcade8350",
+  "tool_count": 12,
   "tools": [
+    "fedlex_get_consultation",
     "fedlex_get_law_by_sr",
     "fedlex_get_law_history",
+    "fedlex_get_open_consultations",
     "fedlex_get_recent_publications",
     "fedlex_get_upcoming_changes",
+    "fedlex_search_consultations",
     "fedlex_search_gazette",
     "fedlex_search_laws",
-    "fedlex_search_treaties"
+    "fedlex_search_treaties",
+    "termdat_get_concept",
+    "termdat_lookup_term"
   ],
-  "generated_on": "2026-06-03"
+  "generated_on": "2026-07-18"
 }

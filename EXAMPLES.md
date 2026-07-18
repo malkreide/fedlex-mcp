@@ -90,3 +90,33 @@ MCP-Enthusiast:innen, Forscher:innen, Prompt Engineers, öffentliche Verwaltung
 | **Botschaften und Vorstösse im Bundesblatt (BBl) suchen** | `fedlex_search_gazette` | Nein |
 | **alle bisherigen Fassungen eines Gesetzes auflisten** | `fedlex_get_law_history` | Nein |
 | **internationale Abkommen der Schweiz finden** | `fedlex_search_treaties` | Nein |
+| **offene Vernehmlassungen und ihre Fristen überwachen** | `fedlex_get_open_consultations` | Nein |
+| **Vernehmlassungen nach Thema/Status/Amt durchsuchen** | `fedlex_search_consultations` | Nein |
+| **eine Vernehmlassung im Detail (inkl. Unterlagen) ansehen** | `fedlex_get_consultation` | Nein |
+| **einen Fachbegriff in andere Landessprachen übersetzen** | `termdat_lookup_term` | Nein |
+| **einen vollständigen TERMDAT-Eintrag abrufen** | `termdat_get_concept` | Nein |
+
+---
+
+### 🏛️ Vernehmlassungen & Terminologie (v1.1.0)
+
+**Anchor-Demo: von der offenen Vernehmlassung zur mehrsprachigen Stellungnahme**
+«Welche Vernehmlassungen mit Bildungsbezug laufen aktuell, bis wann läuft die Frist, welches Amt ist federführend — und wie lauten die zentralen Fachbegriffe auf Französisch und Italienisch für die Stellungnahme?»
+→ `fedlex_get_open_consultations(keyword="Bildung")`
+→ `fedlex_get_consultation(event_id="proj/2026/71/cons_1")`
+→ `termdat_lookup_term(term="Volksschule", target_languages=["fr","it"])`
+*Warum nützlich:* Fedlex sagt, worauf man antworten muss und bis wann; TERMDAT sagt, wie man es in den anderen Landessprachen nennt. Die ganze Kette in einem Gespräch, über zwei SPARQL-Endpoints.
+
+**Fristen-Monitoring**
+«Auf welche Bundesvorlagen kann man gerade noch Stellung nehmen, sortiert nach Frist?»
+→ `fedlex_get_open_consultations(limit=20)`
+*Warum nützlich:* Filtert primär über die Frist (`eventEndDate >= heute`), nicht über den Status — und markiert Widersprüche zwischen Status und Frist mit `status_conflict: true`.
+
+**Portfolio-Synergie: Prozesskette Vernehmlassung → Parlament → Referendum**
+«Zeig mir die laufende Vernehmlassung zum Thema X, dann die parlamentarische Behandlung und schliesslich eine allfällige Volksabstimmung.»
+→ `fedlex_search_consultations(keyword="X")` *(dieser Server)*
+→ `parlament-mcp` *(parlamentarische Phase, [github.com/malkreide](https://github.com/malkreide))*
+→ `swiss-democracy-mcp` *(Referendumsphase, [github.com/malkreide](https://github.com/malkreide))*
+*Warum nützlich:* Bildet den gesamten Gesetzgebungs-Lebenszyklus über drei aufeinander abgestimmte MCP-Server ab.
+
+> ℹ️ **Hinweis zu TERMDAT:** Über LINDAS sind 77'692 von rund 400'000 Einträgen als Linked Data publiziert. Ein negativer Treffer bedeutet nicht, dass der Begriff in TERMDAT fehlt, sondern nur, dass er nicht im publizierten Teilbestand liegt.

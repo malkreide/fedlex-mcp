@@ -5,7 +5,16 @@ MCP server für das Schweizer Bundesrecht via den Fedlex SPARQL-Endpoint.
 Ermöglicht Zugriff auf die Systematische Rechtssammlung (SR), Amtliche
 Sammlung (AS), Bundesblatt (BBl) und Staatsverträge.
 
-Datenquelle: https://fedlex.data.admin.ch
+Ab v1.1.0 zusätzlich abgedeckt (beide ebenfalls SPARQL-basiert):
+  - Vernehmlassungen (jolux:Consultation) über denselben Fedlex-Endpoint
+  - TERMDAT, die Terminologiedatenbank der Bundeskanzlei, über den separaten
+    LINDAS-Endpoint (lindas.admin.ch/query, Graph fch/termdat)
+
+Isolationspflicht (ARCH A): Fedlex und LINDAS sind getrennte Endpoints mit
+getrennten httpx-Clients und Timeouts. Ein LINDAS-Ausfall darf die fedlex_*-
+Tools nicht beeinträchtigen und umgekehrt.
+
+Datenquelle: https://fedlex.data.admin.ch  ·  https://lindas.admin.ch/fch/termdat
 Lizenz: Freie Wiederverwendung gemäss fedlex.admin.ch/de/broadcasters
 
 JOLux-Datenmodell (verifiziert):
@@ -27,14 +36,16 @@ MCP Protocol Version: ausgehandelt vom mcp-SDK (>=1.3.0); siehe README-Sektion
 "MCP Protocol Version".
 """
 
+import asyncio
 import hashlib
 import json
 import os
+import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -55,12 +66,45 @@ REQUEST_TIMEOUT = 45
 MAX_RESULTS_DEFAULT = 20
 MAX_RESULTS_LIMIT = 100
 
+# TERMDAT via LINDAS — bewusst ein SEPARATER Endpoint mit eigenem Client und
+# eigenem Timeout (Isolationspflicht, ARCH A). Ein LINDAS-Ausfall darf die
+# fedlex_*-Tools nicht beeinträchtigen.
+LINDAS_ENDPOINT = "https://lindas.admin.ch/query"
+LINDAS_HOST = "lindas.admin.ch"
+LINDAS_GRAPH = "https://lindas.admin.ch/fch/termdat"
+LINDAS_TIMEOUT = 45
+TERMDAT_TERM_TYPE = "https://schema.ld.admin.ch/Term"
+TERMDAT_REGISTER_BASE = "https://register.ld.admin.ch/termdat"
+# Reality-Check-Diskrepanz (Quirk 2): die Bundeskanzlei kommuniziert ~400'000
+# TERMDAT-Einträge, als Linked Data auf LINDAS liegen jedoch nur rund 77'692.
+TERMDAT_LINDAS_ENTRIES = 77_692
+TERMDAT_COMMUNICATED_ENTRIES = 400_000
+
 SOURCE_NAME = "Fedlex, Schweizerische Bundeskanzlei (fedlex.admin.ch)"
 SOURCE_LICENSE = "Freie Wiederverwendung gemäss fedlex.admin.ch/de/broadcasters"
+TERMDAT_SOURCE_NAME = "TERMDAT, Schweizerische Bundeskanzlei — via LINDAS (lindas.admin.ch/fch/termdat)"
+TERMDAT_LICENSE = "Open reuse licence (opendata.swiss / LINDAS)"
 
-# Defense-in-depth: der Server spricht ausschliesslich diesen einen Endpoint an
-# (SEC-021 Egress-Allow-List auf Code-Ebene).
-ALLOWED_EGRESS_HOSTS = frozenset({FEDLEX_DATA_HOST})
+# Attribution-Strings. Der TERMDAT-Hinweis auf den publizierten Teilbestand
+# gehört in JEDE TERMDAT-Response (nicht nur ins README), damit das Modell aus
+# einem negativen Treffer nicht schliesst, der Begriff fehle in TERMDAT.
+ATTRIBUTION_FEDLEX = "Data: Fedlex / Swiss Federal Chancellery — open reuse licence."
+ATTRIBUTION_TERMDAT = (
+    "Data: TERMDAT / Swiss Federal Chancellery, Terminology Section, "
+    "via LINDAS (lindas.admin.ch/fch/termdat). "
+    "Partial dataset: 77,692 of ~400,000 entries published as Linked Data."
+)
+
+# Defense-in-depth: der Server spricht ausschliesslich diese Endpoints an
+# (SEC-021 Egress-Allow-List auf Code-Ebene). LINDAS ist bewusst getrennt
+# gelistet — sein Ausfall isoliert (siehe run_lindas / _lindas_client).
+ALLOWED_EGRESS_HOSTS = frozenset({FEDLEX_DATA_HOST, LINDAS_HOST})
+
+# Transiente HTTP-Fehler, bei denen ein erneuter Versuch sinnvoll ist. 400/404
+# sind bewusst NICHT enthalten (deterministische Fehler, kein Retry).
+RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+RETRY_MAX_ATTEMPTS = 3
+RETRY_BASE_DELAY = 0.5  # Sekunden; exponentielles Backoff 0.5s, 1.0s. Tests setzen 0.
 
 # Whitelist-Pattern für Freitext-Suchbegriffe (SEC-018). Erlaubt Buchstaben
 # (inkl. Umlaute/Akzente via Unicode-\w), Ziffern, Leerzeichen und gängige
@@ -82,7 +126,44 @@ STATUS_LABELS = {
     STATUS_NO_LONGER_FORCE: "❌ Nicht mehr in Kraft",
 }
 
+# Vernehmlassungs-Status-Vokabular (verifiziert live am 18.07.2026 gegen
+# .../vocabulary/consultation-status/). Hart im Code hinterlegt, damit die
+# Tools keine zusätzliche Vokabular-Abfrage pro Aufruf brauchen.
+CONSULTATION_STATUS_BASE = "https://fedlex.data.admin.ch/vocabulary/consultation-status/"
+CONSULTATION_STATUS_RUNNING = CONSULTATION_STATUS_BASE + "2"
+CONSULTATION_STATUS_LABELS = {
+    CONSULTATION_STATUS_BASE + "0": "In Vorbereitung",
+    CONSULTATION_STATUS_BASE + "1": "Geplant",
+    CONSULTATION_STATUS_BASE + "2": "Laufend",
+    CONSULTATION_STATUS_BASE + "3": "Abgeschlossen – abwarten Stellungnahmen und/oder des Ergebnisberichts",
+    CONSULTATION_STATUS_BASE + "4": "Abgeschlossen – abwarten Ergebnisbericht",
+    CONSULTATION_STATUS_BASE + "5": "Abgeschlossen",
+    CONSULTATION_STATUS_BASE + "6": "Zurückgezogen",
+}
+# Freundliche Kurzcodes für den optionalen Status-Filter in
+# fedlex_search_consultations (User-Input → Vokabular-URI, keine Interpolation
+# von Freitext).
+CONSULTATION_STATUS_ALIASES = {
+    "in_preparation": CONSULTATION_STATUS_BASE + "0",
+    "planned": CONSULTATION_STATUS_BASE + "1",
+    "running": CONSULTATION_STATUS_BASE + "2",
+    "closed_awaiting_opinions": CONSULTATION_STATUS_BASE + "3",
+    "closed_awaiting_report": CONSULTATION_STATUS_BASE + "4",
+    "closed": CONSULTATION_STATUS_BASE + "5",
+    "withdrawn": CONSULTATION_STATUS_BASE + "6",
+}
+
+# eventId einer Vernehmlassung, z.B. "proj/2026/71/cons_1". Strikte Whitelist,
+# damit nichts Injizierbares in ein SPARQL-Literal gelangt (SEC-018).
+EVENT_ID_PATTERN = r"^proj/\d{4}/\d+/cons_\d+$"
+# TERMDAT-Eingabe: entweder eine reine ID (40109), eine Konzept-/Term-URI unter
+# register.ld.admin.ch/termdat/… oder die termdat.bk.admin.ch/entry/…-Form.
+# Nur unkritische Zeichen erlaubt; die numerische ID wird ohnehin serverseitig
+# extrahiert und die URI selbst konstruiert (injektionssicher).
+TERMDAT_INPUT_PATTERN = r"^[0-9A-Za-z:/._\-]+$"
+
 FEDLEX_SOURCE = f"\n---\n*Quelle: {SOURCE_NAME}*"
+TERMDAT_SOURCE = f"\n---\n*{ATTRIBUTION_TERMDAT}*"
 
 # ---------------------------------------------------------------------------
 # Strukturiertes Logging (OBS-003)
@@ -220,28 +301,45 @@ class FedlexResponse(BaseModel):
 
 @dataclass
 class AppContext:
-    """Über den Lifespan geteilte Ressourcen."""
+    """Über den Lifespan geteilte Ressourcen.
+
+    Zwei getrennte Clients erfüllen die Isolationspflicht (ARCH A): Fedlex und
+    LINDAS teilen sich weder Connection-Pool noch Timeout, damit ein hängender
+    Endpoint den jeweils anderen nicht ausbremst.
+    """
 
     client: httpx.AsyncClient
+    lindas_client: httpx.AsyncClient
 
 
-# Ein einziger, über den Server-Lifecycle geteilter HTTP-Client (SDK-001).
-# Wird im Lifespan erstellt und sauber geschlossen — kein Client pro Tool-Call.
+# Über den Server-Lifecycle geteilte HTTP-Clients (SDK-001) — je einer pro
+# Endpoint, im Lifespan erstellt und sauber geschlossen (kein Client pro Call).
 _http_client: httpx.AsyncClient | None = None
+_lindas_client: httpx.AsyncClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
-    """Erstellt den geteilten HTTP-Client und schliesst ihn beim Shutdown."""
-    global _http_client
+    """Erstellt die geteilten HTTP-Clients (Fedlex + LINDAS) und schliesst sie."""
+    global _http_client, _lindas_client
     _init_tracing()
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+    async with (
+        httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client,
+        httpx.AsyncClient(timeout=LINDAS_TIMEOUT) as lindas_client,
+    ):
         _http_client = client
-        log.info("lifespan_start", shared_http_client=True, tracing=_tracer is not None)
+        _lindas_client = lindas_client
+        log.info(
+            "lifespan_start",
+            shared_http_client=True,
+            isolated_lindas_client=True,
+            tracing=_tracer is not None,
+        )
         try:
-            yield AppContext(client=client)
+            yield AppContext(client=client, lindas_client=lindas_client)
         finally:
             _http_client = None
+            _lindas_client = None
             log.info("lifespan_stop")
 
 
@@ -257,29 +355,36 @@ async def _trace(ctx: Context | None, tool: str, **fields: object) -> None:
 
 
 def _ok(tool: str, results: list[dict], markdown: str,
-        match_type: Literal["exact", "none"] = "exact") -> FedlexResponse:
+        match_type: Literal["exact", "none"] = "exact",
+        source: str = SOURCE_NAME, license: str = SOURCE_LICENSE,
+        message: str | None = None) -> FedlexResponse:
     return FedlexResponse(
-        tool=tool, match_type=match_type, count=len(results),
-        results=results, markdown=markdown,
+        source=source, license=license, tool=tool, match_type=match_type,
+        count=len(results), results=results, markdown=markdown, message=message,
     )
 
 
-def _empty(tool: str, markdown: str) -> FedlexResponse:
+def _empty(tool: str, markdown: str, source: str = SOURCE_NAME,
+           license: str = SOURCE_LICENSE, message: str | None = None) -> FedlexResponse:
     return FedlexResponse(
-        tool=tool, match_type="none", count=0, results=[], markdown=markdown,
+        source=source, license=license, tool=tool, match_type="none",
+        count=0, results=[], markdown=markdown, message=message,
     )
 
 
-async def _fail(ctx: Context | None, tool: str, e: Exception) -> FedlexResponse:
+async def _fail(ctx: Context | None, tool: str, e: Exception, *,
+                service: str = "Fedlex", source: str = SOURCE_NAME,
+                license: str = SOURCE_LICENSE) -> FedlexResponse:
     """Einheitlicher Fehler-Pfad: maskierte Meldung + ctx.error (SDK-003 / OBS-002)."""
-    msg = handle_error(tool, e)
+    msg = handle_error(tool, e, service=service)
     if ctx is not None:
         try:
             await ctx.error(msg)
         except Exception:  # pragma: no cover - Context ohne aktive Session
             pass
     return FedlexResponse(
-        tool=tool, match_type="error", count=0, results=[], markdown=msg, message=msg,
+        source=source, license=license, tool=tool, match_type="error",
+        count=0, results=[], markdown=msg, message=msg,
     )
 
 
@@ -316,20 +421,54 @@ async def run_sparql(query: str, client: httpx.AsyncClient | None = None) -> lis
     """
     active = client or _http_client
     if active is not None:
-        return await _execute_sparql(active, query)
+        return await _execute_sparql(active, SPARQL_ENDPOINT, query)
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as tmp:
-        return await _execute_sparql(tmp, query)
+        return await _execute_sparql(tmp, SPARQL_ENDPOINT, query)
 
 
-async def _execute_sparql(client: httpx.AsyncClient, query: str) -> list[dict]:
-    assert_host_allowed(SPARQL_ENDPOINT)
-    response = await client.get(
-        SPARQL_ENDPOINT,
-        params={"query": query, "format": "application/sparql-results+json"},
-        headers={"Accept": "application/sparql-results+json"},
-    )
-    response.raise_for_status()
-    return response.json().get("results", {}).get("bindings", [])
+async def run_lindas(query: str, client: httpx.AsyncClient | None = None) -> list[dict]:
+    """Führt SPARQL-Abfrage gegen den LINDAS-Endpoint (TERMDAT) aus.
+
+    Nutzt bewusst einen EIGENEN Client (_lindas_client) mit eigenem Timeout —
+    Isolation gegenüber Fedlex (ARCH A). Ein LINDAS-Ausfall bleibt hier lokal
+    und erreicht die fedlex_*-Tools nicht.
+    """
+    active = client or _lindas_client
+    if active is not None:
+        return await _execute_sparql(active, LINDAS_ENDPOINT, query)
+    async with httpx.AsyncClient(timeout=LINDAS_TIMEOUT) as tmp:
+        return await _execute_sparql(tmp, LINDAS_ENDPOINT, query)
+
+
+async def _execute_sparql(client: httpx.AsyncClient, endpoint: str, query: str) -> list[dict]:
+    """Sendet die Query an `endpoint` und gibt die Bindings zurück.
+
+    Wiederholt ausschliesslich transiente Fehler (RETRYABLE_STATUS,
+    Timeout/Netzwerk) mit exponentiellem Backoff; deterministische Fehler wie
+    HTTP 400 werden sofort durchgereicht. Der Ziel-Host wird vor jedem Versuch
+    gegen die Egress-Allow-List geprüft (SEC-021).
+    """
+    assert_host_allowed(endpoint)
+    params = {"query": query, "format": "application/sparql-results+json"}
+    headers = {"Accept": "application/sparql-results+json"}
+    last_exc: Exception | None = None
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            response = await client.get(endpoint, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json().get("results", {}).get("bindings", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in RETRYABLE_STATUS:
+                raise
+            last_exc = e
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
+            last_exc = e
+        if attempt < RETRY_MAX_ATTEMPTS - 1:
+            log.info("sparql_retry", endpoint=endpoint, attempt=attempt + 1,
+                     error_type=type(last_exc).__name__)
+            await asyncio.sleep(RETRY_BASE_DELAY * (2 ** attempt))
+    assert last_exc is not None  # pragma: no cover - Schleife garantiert gesetzt
+    raise last_exc
 
 
 def val(binding: dict, key: str, default: str = "") -> str:
@@ -351,13 +490,16 @@ def status_label(status_uri: str) -> str:
     return STATUS_LABELS.get(status_uri, f"({status_uri.split('/')[-1]})")
 
 
-def handle_error(tool: str, e: Exception) -> str:
+def handle_error(tool: str, e: Exception, service: str = "Fedlex") -> str:
     """Einheitliche, handlungsweisende Fehlermeldungen.
 
-    Interne Exception-Details werden ausschliesslich serverseitig geloggt und
-    nie an das LLM zurückgegeben (OBS-001 / OBS-002).
+    `service` benennt den betroffenen Endpoint ("Fedlex" oder "TERMDAT (LINDAS)"),
+    damit das Modell bei einem isolierten LINDAS-Ausfall nicht auf einen
+    Fedlex-Fehler schliesst. Interne Exception-Details werden ausschliesslich
+    serverseitig geloggt und nie an das LLM zurückgegeben (OBS-001 / OBS-002).
     """
-    log.warning("tool_error", tool=tool, error_type=type(e).__name__, detail=str(e))
+    log.warning("tool_error", tool=tool, service=service,
+                error_type=type(e).__name__, detail=str(e))
     if isinstance(e, httpx.HTTPStatusError):
         code = e.response.status_code
         if code == 400:
@@ -365,16 +507,16 @@ def handle_error(tool: str, e: Exception) -> str:
         if code == 429:
             return "Fehler: Rate Limit erreicht. Bitte kurz warten und erneut versuchen."
         if code == 503:
-            return "Fehler: Fedlex vorübergehend nicht verfügbar. Später erneut versuchen."
-        return f"Fehler: HTTP {code} vom Fedlex-Endpoint."
+            return f"Fehler: {service} vorübergehend nicht verfügbar. Später erneut versuchen."
+        return f"Fehler: HTTP {code} vom {service}-Endpoint."
     if isinstance(e, (httpx.TimeoutException, httpx.ReadTimeout)):
         return (
-            "Fehler: Timeout beim Fedlex-Endpoint. "
+            f"Fehler: Timeout beim {service}-Endpoint. "
             "Komplexe SPARQL-Abfragen können länger dauern — bitte erneut versuchen."
         )
     if isinstance(e, httpx.ConnectError):
-        return "Fehler: Verbindung zu Fedlex fehlgeschlagen. Internetverbindung prüfen."
-    return "Fehler: Unerwarteter Fehler beim Abruf vom Fedlex-Endpoint. Bitte erneut versuchen."
+        return f"Fehler: Verbindung zu {service} fehlgeschlagen. Internetverbindung prüfen."
+    return f"Fehler: Unerwarteter Fehler beim Abruf vom {service}-Endpoint. Bitte erneut versuchen."
 
 
 def result_header(count: int, desc: str) -> str:
@@ -1132,6 +1274,834 @@ LIMIT {params.limit}
             return await _fail(ctx, tool, e)
 
 
+# ===========================================================================
+# Erweiterung v1.1.0 — Vernehmlassungen (Fedlex) & TERMDAT (LINDAS)
+# ===========================================================================
+# Beide Quellen sind SPARQL-basiert; die Fedlex-Infrastruktur oben (Envelope,
+# Escaping, Egress-Allow-List, Fehler-Masking, Retry) wird wiederverwendet.
+# Neu ist nur der zweite, ISOLIERTE Endpoint LINDAS für TERMDAT.
+
+
+class TermLanguage(StrEnum):
+    """Sprachen von TERMDAT. Zusätzlich zu den vier Landessprachen auch EN.
+
+    Achtung: `rm` (Rätoromanisch) ist im LINDAS-Teilbestand faktisch nicht
+    besetzt (0 Namen live verifiziert) — als Zielsprache erlaubt, liefert aber
+    in aller Regel keinen Treffer.
+    """
+
+    DE = "de"
+    FR = "fr"
+    IT = "it"
+    RM = "rm"
+    EN = "en"
+
+
+# ---------------------------------------------------------------------------
+# Helfer — Vernehmlassungen
+# ---------------------------------------------------------------------------
+
+
+def consultation_status_label(status_uri: str) -> str:
+    """Lesbares Label für einen consultation-status-URI (verifiziertes Mapping)."""
+    if not status_uri:
+        return "–"
+    return CONSULTATION_STATUS_LABELS.get(status_uri, f"({status_uri.rstrip('/').split('/')[-1]})")
+
+
+def _deadline_conflict(status_uri: str, end_date: str | None, today: str) -> bool | None:
+    """Quirk 1: Status und Frist sind unabhängige Signale — Frist gewinnt.
+
+    Gibt True zurück, wenn beide Signale vorhanden sind und sich widersprechen
+    (Status «Laufend», Frist aber abgelaufen — oder umgekehrt). None, wenn die
+    Frist fehlt (dann ist kein Abgleich möglich). Vgl. CHANGELOG.
+    """
+    if not end_date:
+        return None
+    is_open_by_deadline = end_date >= today
+    is_running_by_status = status_uri == CONSULTATION_STATUS_RUNNING
+    return is_open_by_deadline != is_running_by_status
+
+
+def consultation_event_url(event_id: str, lang: str = "de") -> str:
+    """fedlex.admin.ch-Link zu einem Vernehmlassungs-Projekt."""
+    return f"{FEDLEX_BASE_URL}/eli/dl/{event_id}/{lang}"
+
+
+def _consultation_record(b: dict, lang: str, today: str) -> dict:
+    """Baut einen strukturierten Vernehmlassungs-Datensatz aus einem Binding."""
+    event_id = val(b, "eventId")
+    status_uri = val(b, "status")
+    end_date = val(b, "end") or None
+    inst = val(b, "instLabel") or None
+    inst2 = val(b, "inst2Label") or None
+    conflict = _deadline_conflict(status_uri, end_date, today)
+    return {
+        "event_id": event_id,
+        "title": val(b, "title", "(kein Titel)"),
+        "status": consultation_status_label(status_uri) if status_uri else None,
+        "status_uri": status_uri or None,
+        "start_date": val(b, "start") or None,
+        "deadline": end_date,
+        "lead_department": inst,
+        "lead_office": inst2,
+        "status_conflict": bool(conflict) if conflict is not None else False,
+        "uri": val(b, "c") or None,
+        "url": consultation_event_url(event_id, lang) if event_id else None,
+    }
+
+
+def _consultation_select_body(lang: str, keyword_filter: str, extra: str = "") -> str:
+    """Gemeinsamer WHERE-Rumpf für Vernehmlassungs-Listen (Titel/Frist/Amt)."""
+    return f"""
+  ?c a jolux:Consultation ;
+     jolux:eventId ?eventId ;
+     jolux:eventTitle ?title .
+  OPTIONAL {{ ?c jolux:consultationStatus ?status . }}
+  OPTIONAL {{
+    ?c jolux:hasSubTask ?t .
+    OPTIONAL {{ ?t jolux:eventStartDate ?start . }}
+    OPTIONAL {{ ?t jolux:eventEndDate ?end . }}
+    OPTIONAL {{
+      ?t jolux:institutionInChargeOfTheEvent ?inst .
+      OPTIONAL {{ ?inst skos:prefLabel ?instLabel . FILTER(LANG(?instLabel) = "de") }}
+    }}
+    OPTIONAL {{
+      ?t jolux:institutionInChargeOfTheEventLevel2 ?inst2 .
+      OPTIONAL {{ ?inst2 skos:prefLabel ?inst2Label . FILTER(LANG(?inst2Label) = "de") }}
+    }}
+  }}
+  FILTER(LANG(?title) = "{lang}")
+  {keyword_filter}
+  {extra}"""
+
+
+# ---------------------------------------------------------------------------
+# Helfer — TERMDAT
+# ---------------------------------------------------------------------------
+
+
+def termdat_concept_id(value: str) -> str | None:
+    """Normalisiert eine TERMDAT-Eingabe auf die numerische Konzept-ID.
+
+    Akzeptiert (Quirk 3): reine ID (`40109`), Konzept-URI
+    (`…/termdat/40109`), Term-URI mit Sprach-/Positionssuffix
+    (`…/termdat/40109/3/de`) sowie die `…/entry/40109`-Form. Da nur Ziffern
+    extrahiert und die URI serverseitig konstruiert wird, ist die Eingabe
+    injektionssicher, unabhängig vom restlichen Text.
+    """
+    s = value.strip()
+    if s.isdigit():
+        return s
+    m = re.search(r"/termdat/(\d+)", s) or re.search(r"/entry/(\d+)", s)
+    return m.group(1) if m else None
+
+
+def termdat_concept_uri(concept_id: str) -> str:
+    return f"{TERMDAT_REGISTER_BASE}/{concept_id}"
+
+
+def termdat_entry_url(concept_id: str) -> str:
+    """Menschenlesbarer Link auf den TERMDAT-Eintrag (Web-Frontend)."""
+    return f"https://www.termdat.bk.admin.ch/entry/{concept_id}"
+
+
+def _termdat_ok(tool: str, results: list[dict], markdown: str,
+                match_type: Literal["exact", "none"] = "exact",
+                message: str | None = None) -> FedlexResponse:
+    """Envelope für TERMDAT — trägt IMMER die TERMDAT-Attribution (Teilbestand)."""
+    return _ok(tool, results, markdown + TERMDAT_SOURCE, match_type=match_type,
+               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE, message=message)
+
+
+def _termdat_empty(tool: str, markdown: str, message: str | None = None) -> FedlexResponse:
+    return _empty(tool, markdown + TERMDAT_SOURCE, source=ATTRIBUTION_TERMDAT,
+                  license=TERMDAT_LICENSE, message=message)
+
+
+# ---------------------------------------------------------------------------
+# Input-Modelle — neue Tools
+# ---------------------------------------------------------------------------
+
+
+class GetOpenConsultationsInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    keyword: str | None = Field(
+        default=None,
+        description="Optionaler Themenfilter im Titel, z.B. 'Bildung', 'Datenschutz'.",
+        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+    )
+    language: Language = Field(default=Language.DE, description="Sprache des Titels: de, fr, it, rm")
+    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
+                       description=f"Maximale Trefferzahl (1–{MAX_RESULTS_LIMIT})")
+
+
+class SearchConsultationsInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    keyword: str | None = Field(
+        default=None,
+        description="Suchbegriff in Titel und Beschreibung. Ohne Begriff: neueste Vernehmlassungen.",
+        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+    )
+    status: Literal[
+        "in_preparation", "planned", "running",
+        "closed_awaiting_opinions", "closed_awaiting_report", "closed", "withdrawn",
+    ] | None = Field(default=None, description="Optionaler Status-Filter (Kurzcode).")
+    from_date: date | None = Field(default=None, description="Frist frühestens (eventEndDate >=).")
+    to_date: date | None = Field(default=None, description="Frist spätestens (eventEndDate <=).")
+    institution: str | None = Field(
+        default=None, description="Teilstring im federführenden Departement/Amt (deutsches Label).",
+        min_length=2, max_length=100, pattern=KEYWORD_PATTERN,
+    )
+    language: Language = Field(default=Language.DE)
+    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT)
+
+
+class GetConsultationInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    event_id: str = Field(
+        ...,
+        description="eventId der Vernehmlassung, z.B. 'proj/2026/71/cons_1'.",
+        min_length=8, max_length=60, pattern=EVENT_ID_PATTERN,
+    )
+    language: Language = Field(default=Language.DE)
+
+
+class TermdatLookupInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    term: str = Field(
+        ...,
+        description="Fachbegriff, z.B. 'Volksschule', 'Datenschutz'.",
+        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+    )
+    target_languages: list[TermLanguage] = Field(
+        default_factory=lambda: [TermLanguage.DE, TermLanguage.FR, TermLanguage.IT,
+                                 TermLanguage.RM, TermLanguage.EN],
+        description="Zielsprachen der Entsprechungen (de, fr, it, rm, en). Standard: alle.",
+        max_length=5,
+    )
+    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
+                       description="Maximale Zahl unterschiedlicher Konzepte.")
+
+
+class TermdatGetConceptInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    concept: str = Field(
+        ...,
+        description=(
+            "TERMDAT-ID oder -URI. Akzeptiert '40109', "
+            "'https://register.ld.admin.ch/termdat/40109' oder eine Term-URI "
+            "wie '…/termdat/40109/3/de'."
+        ),
+        min_length=1, max_length=120, pattern=TERMDAT_INPUT_PATTERN,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tools — Vernehmlassungen
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="fedlex_get_open_consultations",
+    description=(
+        "Listet aktuell OFFENE Vernehmlassungen des Bundes (Fristen-Monitoring).\n"
+        "<use_case>«Auf welche Vorlagen kann man jetzt noch Stellung nehmen, und bis "
+        "wann?» — vorparlamentarisches Verfahren, Frist-Überwachung.</use_case>\n"
+        "<important_notes>Filtert PRIMÄR über die Frist (eventEndDate >= heute), NICHT "
+        "über den Status — beide Signale sind unabhängig und werden bei Widerspruch mit "
+        "status_conflict=true markiert. Sortiert nach Frist aufsteigend. Optional per "
+        "keyword auf ein Thema eingrenzen.</important_notes>\n"
+        "<example>keyword='Bildung'</example>"
+    ),
+    annotations={
+        "title": "Offene Vernehmlassungen (Fristen-Monitoring)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def fedlex_get_open_consultations(
+    params: GetOpenConsultationsInput, ctx: Context | None = None
+) -> FedlexResponse:
+    """Listet aktuell offene Vernehmlassungen, primär gefiltert über die Frist."""
+    tool = "fedlex_get_open_consultations"
+    lang = params.language.value
+    today = date.today().isoformat()
+    checked_at = datetime.now(UTC).isoformat(timespec="seconds")
+    await _trace(ctx, tool, lang=lang, has_keyword=bool(params.keyword))
+
+    kw_filter = (
+        f'FILTER(CONTAINS(LCASE(STR(?title)), "{sparql_escape(params.keyword.lower())}"))'
+        if params.keyword else ""
+    )
+    # Status und Frist sind unabhängige Signale — Frist gewinnt. Vgl. CHANGELOG.
+    deadline_filter = f'FILTER(BOUND(?end) && xsd:date(?end) >= "{today}"^^xsd:date)'
+    query = f"""
+PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+SELECT DISTINCT ?c ?eventId ?title ?status ?start ?end ?instLabel ?inst2Label WHERE {{
+{_consultation_select_body(lang, kw_filter, deadline_filter)}
+}} ORDER BY ASC(?end)
+LIMIT {params.limit}
+"""
+
+    async with _tool_span(tool, lang=lang, has_keyword=bool(params.keyword)):
+        try:
+            bindings = await run_sparql(query)
+
+            kw_txt = f" zum Thema «{params.keyword}»" if params.keyword else ""
+            if not bindings:
+                # Leeres Resultat ist eine Sachaussage, kein Fehler (ARCH-003):
+                # explizit mit Prüfzeitpunkt, damit das Modell nicht halluziniert.
+                msg = (
+                    f"Aktuell keine offenen Vernehmlassungen{kw_txt} mit diesem Filter; "
+                    f"zuletzt geprüft {checked_at}."
+                )
+                md = (
+                    f"## Vernehmlassungen — offen{kw_txt} [{lang.upper()}]\n\n{msg}"
+                    + no_match_hint(
+                        "**Tipps:** Ohne `keyword` erneut versuchen | mit "
+                        "`fedlex_search_consultations` auch abgeschlossene Verfahren durchsuchen."
+                    )
+                )
+                return _empty(tool, md, source=ATTRIBUTION_FEDLEX, message=msg)
+
+            results = [_consultation_record(b, lang, today) for b in bindings]
+            conflicts = sum(1 for r in results if r["status_conflict"])
+            md = result_header(len(results), f"Offene Vernehmlassungen{kw_txt} [{lang.upper()}]")
+            md += f"_Frist-basiert (eventEndDate >= {today}); zuletzt geprüft {checked_at}._\n\n"
+            for r in results:
+                flag = " ⚠️ status_conflict" if r["status_conflict"] else ""
+                md += f"### 📅 Frist {r['deadline']} — {r['title']}{flag}\n"
+                md += f"- **Status:** {r['status'] or '–'}\n"
+                md += f"- **Federführung:** {r['lead_department'] or '–'}"
+                md += f" / {r['lead_office']}\n" if r["lead_office"] else "\n"
+                md += f"- **eventId:** `{r['event_id']}`\n"
+                md += f"- **Link:** [{r['url']}]({r['url']})\n\n"
+            if conflicts:
+                md += (
+                    f"> ⚠️ {conflicts} Eintrag/Einträge mit Status-Frist-Konflikt "
+                    "(Status widerspricht der Frist — die Frist ist massgebend).\n\n"
+                )
+            md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
+            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX)
+
+        except Exception as e:
+            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+
+
+@mcp.tool(
+    name="fedlex_search_consultations",
+    description=(
+        "Volltextsuche über Vernehmlassungen (Titel und Beschreibung), mit Filtern.\n"
+        "<use_case>Recherche im vorparlamentarischen Verfahren — auch abgeschlossene "
+        "Vernehmlassungen, nach Status, Zeitraum oder federführendem Amt.</use_case>\n"
+        "<important_notes>Filter: status (Kurzcode), from_date/to_date auf die Frist, "
+        "institution (Teilstring im Departement/Amt). Ohne keyword: neueste Verfahren. "
+        "Für reines Fristen-Monitoring offener Verfahren "
+        "`fedlex_get_open_consultations` nutzen.</important_notes>\n"
+        "<example>keyword='Bildung', status='closed'</example>"
+    ),
+    annotations={
+        "title": "Vernehmlassungen durchsuchen",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def fedlex_search_consultations(
+    params: SearchConsultationsInput, ctx: Context | None = None
+) -> FedlexResponse:
+    """Volltextsuche über Titel/Beschreibung von Vernehmlassungen, mit Filtern."""
+    tool = "fedlex_search_consultations"
+    lang = params.language.value
+    today = date.today().isoformat()
+    await _trace(ctx, tool, lang=lang, has_keyword=bool(params.keyword), status=params.status)
+
+    filters: list[str] = []
+    if params.keyword:
+        esc = sparql_escape(params.keyword.lower())
+        # Titel ODER Beschreibung (beide sprachbehaftet).
+        filters.append(
+            "OPTIONAL { ?c jolux:eventDescription ?desc . FILTER(LANG(?desc) = \"" + lang + "\") }\n"
+            f'  FILTER(CONTAINS(LCASE(STR(?title)), "{esc}") '
+            f'|| CONTAINS(LCASE(STR(COALESCE(?desc, ""))), "{esc}"))'
+        )
+    if params.status:
+        filters.append(f'FILTER(?status = <{CONSULTATION_STATUS_ALIASES[params.status]}>)')
+    if params.from_date:
+        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) >= "{params.from_date.isoformat()}"^^xsd:date)')
+    if params.to_date:
+        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) <= "{params.to_date.isoformat()}"^^xsd:date)')
+    if params.institution:
+        esc_inst = sparql_escape(params.institution.lower())
+        filters.append(
+            f'FILTER(CONTAINS(LCASE(STR(COALESCE(?instLabel, ?inst2Label, ""))), "{esc_inst}"))'
+        )
+    extra = "\n  ".join(filters)
+
+    query = f"""
+PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+SELECT DISTINCT ?c ?eventId ?title ?status ?start ?end ?instLabel ?inst2Label WHERE {{
+{_consultation_select_body(lang, "", extra)}
+}} ORDER BY DESC(?eventId)
+LIMIT {params.limit}
+"""
+
+    async with _tool_span(tool, lang=lang, status=params.status):
+        try:
+            bindings = await run_sparql(query)
+
+            kw_txt = f"'{params.keyword}'" if params.keyword else "alle"
+            if not bindings:
+                md = (
+                    f"Keine Vernehmlassungen für {kw_txt} mit den gewählten Filtern [{lang.upper()}]."
+                    + no_match_hint(
+                        "**Tipps:** Filter lockern (status/institution/Zeitraum weglassen) | "
+                        "allgemeineren Begriff verwenden."
+                    )
+                )
+                return _empty(tool, md, source=ATTRIBUTION_FEDLEX)
+
+            results = [_consultation_record(b, lang, today) for b in bindings]
+            md = result_header(len(results), f"Vernehmlassungen {kw_txt} [{lang.upper()}]")
+            for r in results:
+                flag = " ⚠️ status_conflict" if r["status_conflict"] else ""
+                deadline = r["deadline"] or "keine Frist"
+                md += f"### {r['title']}{flag}\n"
+                md += f"- **Status:** {r['status'] or '–'} | **Frist:** {deadline}\n"
+                md += f"- **Federführung:** {r['lead_department'] or '–'}\n"
+                md += f"- **eventId:** `{r['event_id']}`\n"
+                md += f"- **Link:** [{r['url']}]({r['url']})\n\n"
+            md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
+            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX)
+
+        except Exception as e:
+            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+
+
+@mcp.tool(
+    name="fedlex_get_consultation",
+    description=(
+        "Detail zu einer Vernehmlassung anhand ihrer eventId.\n"
+        "<use_case>Vollbild zu einem Verfahren: Fristen, federführendes Amt, Status, "
+        "Vernehmlassungsunterlagen und verknüpfte Rechtsressource — Grundlage für eine "
+        "Stellungnahme.</use_case>\n"
+        "<important_notes>Ohne hasSubTask liefert das Tool deadline=null mit Hinweis "
+        "(wirft nicht). status_conflict markiert einen Widerspruch zwischen Status und "
+        "Frist. eventId z.B. aus fedlex_get_open_consultations.</important_notes>\n"
+        "<example>event_id='proj/2026/71/cons_1'</example>"
+    ),
+    annotations={
+        "title": "Vernehmlassung im Detail abrufen",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def fedlex_get_consultation(
+    params: GetConsultationInput, ctx: Context | None = None
+) -> FedlexResponse:
+    """Detail zu einer Vernehmlassung anhand ihrer eventId."""
+    tool = "fedlex_get_consultation"
+    lang = params.language.value
+    today = date.today().isoformat()
+    event_id = params.event_id
+    await _trace(ctx, tool, lang=lang, event_id=event_id)
+
+    esc_id = sparql_escape(event_id)
+    query = f"""
+PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+SELECT ?c ?title ?desc ?status ?start ?end ?instLabel ?inst2Label ?draft ?impact WHERE {{
+  ?c a jolux:Consultation ;
+     jolux:eventId "{esc_id}" .
+  OPTIONAL {{ ?c jolux:eventTitle ?title . FILTER(LANG(?title) = "{lang}") }}
+  OPTIONAL {{ ?c jolux:eventDescription ?desc . FILTER(LANG(?desc) = "{lang}") }}
+  OPTIONAL {{ ?c jolux:consultationStatus ?status . }}
+  OPTIONAL {{ ?c jolux:foreseenImpactToLegalResource ?impact . }}
+  OPTIONAL {{
+    ?c jolux:hasSubTask ?t .
+    OPTIONAL {{ ?t jolux:eventStartDate ?start . }}
+    OPTIONAL {{ ?t jolux:eventEndDate ?end . }}
+    OPTIONAL {{ ?t jolux:opinionHasDraftRelatedDocument ?draft . }}
+    OPTIONAL {{
+      ?t jolux:institutionInChargeOfTheEvent ?inst .
+      OPTIONAL {{ ?inst skos:prefLabel ?instLabel . FILTER(LANG(?instLabel) = "de") }}
+    }}
+    OPTIONAL {{
+      ?t jolux:institutionInChargeOfTheEventLevel2 ?inst2 .
+      OPTIONAL {{ ?inst2 skos:prefLabel ?inst2Label . FILTER(LANG(?inst2Label) = "de") }}
+    }}
+  }}
+}}
+LIMIT 200
+"""
+
+    async with _tool_span(tool, lang=lang, event_id=event_id):
+        try:
+            bindings = await run_sparql(query)
+
+            if not bindings:
+                md = (
+                    f"Keine Vernehmlassung mit eventId **{event_id}** gefunden [{lang.upper()}]."
+                    + no_match_hint(
+                        "**Tipps:** eventId prüfen (Form 'proj/JAHR/NR/cons_N') | "
+                        "mit `fedlex_search_consultations` nach dem Titel suchen."
+                    )
+                )
+                return _empty(tool, md, source=ATTRIBUTION_FEDLEX)
+
+            # Bindings zu einem Datensatz aggregieren (mehrere Zeilen wegen
+            # mehrfacher Unterlagen/Institutionen).
+            first = bindings[0]
+            title = next((val(b, "title") for b in bindings if val(b, "title")), "(kein Titel)")
+            desc = next((val(b, "desc") for b in bindings if val(b, "desc")), None)
+            status_uri = next((val(b, "status") for b in bindings if val(b, "status")), "")
+            start = next((val(b, "start") for b in bindings if val(b, "start")), None)
+            end = next((val(b, "end") for b in bindings if val(b, "end")), None)
+            inst = next((val(b, "instLabel") for b in bindings if val(b, "instLabel")), None)
+            inst2 = next((val(b, "inst2Label") for b in bindings if val(b, "inst2Label")), None)
+            drafts = sorted({val(b, "draft") for b in bindings if val(b, "draft")})
+            impacts = sorted({val(b, "impact") for b in bindings if val(b, "impact")})
+            conflict = _deadline_conflict(status_uri, end, today)
+            has_subtask = bool(start or end or drafts or inst or inst2)
+
+            record = {
+                "event_id": event_id,
+                "title": title,
+                "description": desc,
+                "status": consultation_status_label(status_uri) if status_uri else None,
+                "status_uri": status_uri or None,
+                "start_date": start,
+                "deadline": end,
+                "status_conflict": bool(conflict) if conflict is not None else False,
+                "lead_department": inst,
+                "lead_office": inst2,
+                "draft_documents": [{"uri": d, "url": fedlex_url(d, lang)} for d in drafts],
+                "related_legal_resource": [
+                    {"uri": i, "url": fedlex_url(i, lang)} for i in impacts
+                ],
+                "uri": val(first, "c") or None,
+                "url": consultation_event_url(event_id, lang),
+            }
+
+            md = f"## Vernehmlassung: {title}\n\n"
+            md += "| Feld | Wert |\n|---|---|\n"
+            md += f"| **eventId** | `{event_id}` |\n"
+            md += f"| **Status** | {record['status'] or '–'} |\n"
+            md += f"| **Beginn** | {start or '–'} |\n"
+            if end:
+                md += f"| **Frist (eventEndDate)** | {end} |\n"
+            else:
+                md += "| **Frist (eventEndDate)** | – (keine Frist hinterlegt) |\n"
+            md += f"| **Federführendes Departement** | {inst or '–'} |\n"
+            md += f"| **Federführendes Amt** | {inst2 or '–'} |\n"
+            md += f"| **Status-Frist-Konflikt** | {'⚠️ ja' if record['status_conflict'] else 'nein'} |\n"
+            md += f"\n**Direktlink:** [{record['url']}]({record['url']})\n"
+            if desc:
+                md += f"\n**Beschreibung:** {desc}\n"
+            if not has_subtask:
+                md += (
+                    "\n> ℹ️ Zu dieser Vernehmlassung ist keine Teilaufgabe (hasSubTask) "
+                    "hinterlegt — daher keine Frist, keine Federführung, keine Unterlagen "
+                    "(48 von 2553 Consultations betroffen).\n"
+                )
+            if record["status_conflict"]:
+                md += (
+                    "\n> ⚠️ **status_conflict:** Status und Frist widersprechen sich. "
+                    "Massgebend ist die Frist (eventEndDate), nicht der Status.\n"
+                )
+            if drafts:
+                md += f"\n### 📎 Vernehmlassungsunterlagen ({len(drafts)})\n"
+                for d in record["draft_documents"]:
+                    md += f"- [{d['url']}]({d['url']})\n"
+            if impacts:
+                md += "\n### 🔗 Betroffene Rechtsressource\n"
+                for i in record["related_legal_resource"]:
+                    md += f"- [{i['url']}]({i['url']})\n"
+            md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
+            return _ok(tool, [record], md, source=ATTRIBUTION_FEDLEX)
+
+        except Exception as e:
+            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+
+
+# ---------------------------------------------------------------------------
+# Tools — TERMDAT (LINDAS, isoliert)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="termdat_lookup_term",
+    description=(
+        "Schlägt einen Fachbegriff in TERMDAT nach und liefert die Entsprechungen "
+        "in den anderen Landessprachen (de/fr/it/rm/en) samt Definition.\n"
+        "<use_case>«Wie heisst dieser Begriff auf Französisch/Italienisch?» — amtliche "
+        "Terminologie der Bundeskanzlei, z.B. für mehrsprachige Stellungnahmen.</use_case>\n"
+        "<important_notes>Datenquelle ist der LINDAS-Teilbestand von TERMDAT: 77'692 von "
+        "~400'000 Einträgen. Ein Negativtreffer heisst NICHT, dass der Begriff in TERMDAT "
+        "fehlt, sondern nur, dass er nicht im publizierten Linked-Data-Teil liegt. "
+        "'rm' ist im Teilbestand praktisch leer.</important_notes>\n"
+        "<example>term='Volksschule', target_languages=['fr','it']</example>"
+    ),
+    annotations={
+        "title": "Fachbegriff in TERMDAT nachschlagen",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def termdat_lookup_term(
+    params: TermdatLookupInput, ctx: Context | None = None
+) -> FedlexResponse:
+    """Begriff → Entsprechungen in de/fr/it/rm/en inkl. Definition (TERMDAT/LINDAS)."""
+    tool = "termdat_lookup_term"
+    langs = [lang.value for lang in params.target_languages]
+    await _trace(ctx, tool, term_len=len(params.term), targets=",".join(langs))
+
+    esc = sparql_escape(params.term.lower())
+    # Schritt 1: passende Einträge (Konzept ODER Synonym-Variante) über den Namen.
+    match_query = f"""
+PREFIX schema: <http://schema.org/>
+SELECT DISTINCT ?s ?name WHERE {{
+  GRAPH <{LINDAS_GRAPH}> {{
+    ?s a <{TERMDAT_TERM_TYPE}> ; schema:name ?name .
+    FILTER(LCASE(STR(?name)) = "{esc}")
+  }}
+}}
+LIMIT 100
+"""
+
+    async with _tool_span(tool, targets=",".join(langs)):
+        try:
+            matches = await run_lindas(match_query)
+
+            if not matches:
+                msg = (
+                    f"Kein TERMDAT-Eintrag für «{params.term}» im LINDAS-Teilbestand "
+                    f"({TERMDAT_LINDAS_ENTRIES:,} von ~{TERMDAT_COMMUNICATED_ENTRIES:,} "
+                    "Einträgen). Das schliesst nicht aus, dass der Begriff in TERMDAT "
+                    "existiert — er ist nur nicht als Linked Data publiziert."
+                ).replace(",", "'")
+                md = f"## TERMDAT — «{params.term}»\n\n{msg}" + no_match_hint(
+                    "**Tipps:** exakte Schreibweise/Grossschreibung prüfen | Synonym versuchen | "
+                    "auf www.termdat.bk.admin.ch nachschlagen."
+                )
+                return _termdat_empty(tool, md, message=msg)
+
+            # Schritt 2: Match-URIs auf Konzept-IDs normalisieren (Quirk 3).
+            concept_ids: list[str] = []
+            for b in matches:
+                cid = termdat_concept_id(val(b, "s"))
+                if cid and cid not in concept_ids:
+                    concept_ids.append(cid)
+            concept_ids = concept_ids[: params.limit]
+            if not concept_ids:
+                md = f"## TERMDAT — «{params.term}»\n\nTreffer ohne auflösbare Konzept-ID."
+                return _termdat_empty(tool, md)
+            values_uris = " ".join(f"<{termdat_concept_uri(c)}>" for c in concept_ids)
+
+            lang_filter = ", ".join(f'"{lang}"' for lang in langs)
+            detail_query = f"""
+PREFIX schema: <http://schema.org/>
+SELECT ?c ?id ?name ?nl ?desc ?dl WHERE {{
+  GRAPH <{LINDAS_GRAPH}> {{
+    VALUES ?c {{ {values_uris} }}
+    ?c schema:name ?name . BIND(LANG(?name) AS ?nl)
+    OPTIONAL {{ ?c schema:identifier ?id . }}
+    OPTIONAL {{ ?c schema:description ?desc . BIND(LANG(?desc) AS ?dl) }}
+    FILTER(?nl IN ({lang_filter}))
+  }}
+}}
+"""
+            rows = await run_lindas(detail_query)
+
+            # Pro Konzept Namen/Definitionen je Sprache dedupliziert sammeln
+            # (name × description erzeugt ein Kreuzprodukt).
+            concepts: dict[str, dict] = {}
+            for b in rows:
+                curi = val(b, "c")
+                cid = termdat_concept_id(curi) or curi
+                c = concepts.setdefault(cid, {"names": {}, "descriptions": {}, "uri": curi})
+                nl, name = val(b, "nl"), val(b, "name")
+                if nl and name:
+                    c["names"].setdefault(nl, name)
+                dl, desc = val(b, "dl"), val(b, "desc")
+                if dl and desc:
+                    c["descriptions"].setdefault(dl, desc)
+
+            if not concepts:
+                md = f"## TERMDAT — «{params.term}»\n\nEintrag gefunden, aber keine Namen in den Zielsprachen {langs}."
+                return _termdat_empty(tool, md)
+
+            results: list[dict] = []
+            md = result_header(len(concepts), f"TERMDAT «{params.term}» → {', '.join(langs)}")
+            for cid in concept_ids:
+                if cid not in concepts:
+                    continue
+                c = concepts[cid]
+                names = {lang: c["names"].get(lang) for lang in langs}
+                url = termdat_entry_url(cid)
+                results.append({
+                    "concept_id": cid,
+                    "names": names,
+                    "descriptions": c["descriptions"],
+                    "uri": c["uri"],
+                    "url": url,
+                })
+                headline = c["names"].get("de") or next(iter(c["names"].values()), params.term)
+                md += f"### {headline}  ·  TERMDAT {cid}\n"
+                for lang in langs:
+                    if names.get(lang):
+                        md += f"- **{lang.upper()}:** {names[lang]}\n"
+                definition = c["descriptions"].get("de") or next(iter(c["descriptions"].values()), None)
+                if definition:
+                    md += f"- **Definition:** {definition}\n"
+                md += f"- **Eintrag:** [{url}]({url})\n\n"
+            return _termdat_ok(tool, results, md)
+
+        except Exception as e:
+            return await _fail(ctx, tool, e, service="TERMDAT (LINDAS)",
+                               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE)
+
+
+@mcp.tool(
+    name="termdat_get_concept",
+    description=(
+        "Ruft den vollständigen TERMDAT-Eintrag zu einer ID oder URI ab.\n"
+        "<use_case>Vollbild eines Terminologie-Konzepts: alle Sprachbenennungen, "
+        "Definitionen, Synonyme und Quellenangaben.</use_case>\n"
+        "<important_notes>Akzeptiert ID ('40109'), Konzept-URI oder Term-URI mit "
+        "Sprachsuffix ('…/40109/3/de') und normalisiert intern (Quirk 3). Quelle ist der "
+        "LINDAS-Teilbestand (77'692 von ~400'000 Einträgen).</important_notes>\n"
+        "<example>concept='40109'</example>"
+    ),
+    annotations={
+        "title": "TERMDAT-Eintrag vollständig abrufen",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def termdat_get_concept(
+    params: TermdatGetConceptInput, ctx: Context | None = None
+) -> FedlexResponse:
+    """Vollständiger TERMDAT-Eintrag zu einer URI oder ID (LINDAS)."""
+    tool = "termdat_get_concept"
+    await _trace(ctx, tool, raw_len=len(params.concept))
+
+    cid = termdat_concept_id(params.concept)
+    if cid is None:
+        md = (
+            f"Ungültige TERMDAT-Referenz: **{params.concept}**."
+            + no_match_hint(
+                "**Erwartet:** eine ID wie '40109', eine URI "
+                "'https://register.ld.admin.ch/termdat/40109' oder eine Term-URI "
+                "'…/termdat/40109/3/de'."
+            )
+        )
+        return _termdat_empty(tool, md)
+
+    curi = termdat_concept_uri(cid)
+    async with _tool_span(tool, concept_id=cid):
+        try:
+            detail_query = f"""
+PREFIX schema: <http://schema.org/>
+SELECT ?name ?nl ?desc ?dl ?url ?mod WHERE {{
+  GRAPH <{LINDAS_GRAPH}> {{
+    <{curi}> schema:name ?name . BIND(LANG(?name) AS ?nl)
+    OPTIONAL {{ <{curi}> schema:description ?desc . BIND(LANG(?desc) AS ?dl) }}
+    OPTIONAL {{ <{curi}> schema:URL ?url . }}
+    OPTIONAL {{ <{curi}> schema:dateModified ?mod . }}
+  }}
+}}
+"""
+            syn_query = f"""
+PREFIX schema: <http://schema.org/>
+SELECT ?syn ?name ?nl WHERE {{
+  GRAPH <{LINDAS_GRAPH}> {{
+    <{curi}> schema:hasPart ?syn .
+    ?syn schema:name ?name . BIND(LANG(?name) AS ?nl)
+  }}
+}} ORDER BY ?syn
+"""
+            rows = await run_lindas(detail_query)
+            if not rows:
+                msg = (
+                    f"Kein TERMDAT-Konzept mit ID {cid} im LINDAS-Teilbestand "
+                    f"({TERMDAT_LINDAS_ENTRIES:,} von ~{TERMDAT_COMMUNICATED_ENTRIES:,})."
+                ).replace(",", "'")
+                md = f"## TERMDAT {cid}\n\n{msg}" + no_match_hint(
+                    "**Tipps:** ID prüfen | ggf. auf www.termdat.bk.admin.ch nachschlagen."
+                )
+                return _termdat_empty(tool, md, message=msg)
+
+            names: dict[str, str] = {}
+            descriptions: dict[str, str] = {}
+            web_url = termdat_entry_url(cid)
+            modified = None
+            for b in rows:
+                nl, name = val(b, "nl"), val(b, "name")
+                if nl and name:
+                    names.setdefault(nl, name)
+                dl, desc = val(b, "dl"), val(b, "desc")
+                if dl and desc:
+                    descriptions.setdefault(dl, desc)
+                web_url = val(b, "url") or web_url
+                modified = modified or (val(b, "mod") or None)
+
+            syn_rows = await run_lindas(syn_query)
+            synonyms = [
+                {"name": val(b, "name"), "language": val(b, "nl") or None, "uri": val(b, "syn")}
+                for b in syn_rows if val(b, "name")
+            ]
+
+            record = {
+                "concept_id": cid,
+                "names": names,
+                "descriptions": descriptions,
+                "synonyms": synonyms,
+                "date_modified": modified,
+                "uri": curi,
+                "url": web_url,
+            }
+
+            headline = names.get("de") or next(iter(names.values()), f"TERMDAT {cid}")
+            md = f"## TERMDAT {cid}: {headline}\n\n"
+            md += "### Benennungen\n"
+            for lang in ("de", "fr", "it", "rm", "en"):
+                if names.get(lang):
+                    md += f"- **{lang.upper()}:** {names[lang]}\n"
+            if descriptions:
+                md += "\n### Definitionen\n"
+                for lang in ("de", "fr", "it", "rm", "en"):
+                    if descriptions.get(lang):
+                        md += f"- **{lang.upper()}:** {descriptions[lang]}\n"
+            if synonyms:
+                md += f"\n### Synonyme / Varianten ({len(synonyms)})\n"
+                for s in synonyms:
+                    lc = f" [{s['language']}]" if s["language"] else ""
+                    md += f"- {s['name']}{lc}\n"
+            if modified:
+                md += f"\n_Zuletzt geändert: {modified}_\n"
+            md += f"\n**Eintrag:** [{web_url}]({web_url})\n"
+            return _termdat_ok(tool, [record], md)
+
+        except Exception as e:
+            return await _fail(ctx, tool, e, service="TERMDAT (LINDAS)",
+                               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE)
+
+
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
@@ -1153,9 +2123,15 @@ async def get_server_info() -> str:
     return json.dumps(
         {
             "name": "Fedlex MCP Server",
-            "version": "1.0.0",
-            "description": "Zugriff auf das Schweizer Bundesrecht via Fedlex SPARQL",
-            "sparql_endpoint": SPARQL_ENDPOINT,
+            "version": "1.1.0",
+            "description": (
+                "Zugriff auf das Schweizer Bundesrecht, Vernehmlassungen (Fedlex) "
+                "und die Terminologiedatenbank TERMDAT (LINDAS) via SPARQL"
+            ),
+            "endpoints": {
+                "fedlex": SPARQL_ENDPOINT,
+                "lindas_termdat": LINDAS_ENDPOINT,
+            },
             "data_source": FEDLEX_BASE_URL,
             "license": SOURCE_LICENSE,
             "tools": [
@@ -1166,9 +2142,22 @@ async def get_server_info() -> str:
                 "fedlex_search_gazette",
                 "fedlex_get_law_history",
                 "fedlex_search_treaties",
+                "fedlex_get_open_consultations",
+                "fedlex_search_consultations",
+                "fedlex_get_consultation",
+                "termdat_lookup_term",
+                "termdat_get_concept",
             ],
-            "languages": ["de", "fr", "it", "rm"],
-            "data_model": "JOLux Ontology — jolux:ConsolidationAbstract + jolux:Expression",
+            "languages": ["de", "fr", "it", "rm", "en"],
+            "data_model": (
+                "JOLux Ontology — jolux:ConsolidationAbstract + jolux:Expression + "
+                "jolux:Consultation; schema.org (schema.ld.admin.ch) für TERMDAT"
+            ),
+            "isolation": (
+                "Getrennte httpx-Clients/Timeouts für Fedlex und LINDAS; ein "
+                "LINDAS-Ausfall beeinträchtigt die fedlex_*-Tools nicht (ARCH A)."
+            ),
+            "termdat_note": ATTRIBUTION_TERMDAT,
         },
         ensure_ascii=False,
         indent=2,
