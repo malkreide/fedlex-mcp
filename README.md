@@ -2,14 +2,14 @@
 
 # :balance_scale: fedlex-mcp
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-purple)](https://modelcontextprotocol.io/)
 [![No Auth Required](https://img.shields.io/badge/auth-none%20required-brightgreen)](https://github.com/malkreide/fedlex-mcp)
 ![CI](https://github.com/malkreide/fedlex-mcp/actions/workflows/ci.yml/badge.svg)
 
-> MCP Server for Swiss federal law — search the SR, monitor legal changes, and query BBl/treaties via Claude Desktop or Claude.ai
+> MCP Server for Swiss federal law, consultations & official terminology — search the SR, monitor consultation deadlines, and translate terms across the national languages via Claude Desktop or Claude.ai
 
 [:de: Deutsche Version](README.de.md)
 
@@ -17,19 +17,41 @@
 
 ## Overview
 
-`fedlex-mcp` connects AI assistants (Claude) with the **Fedlex SPARQL endpoint** of the Swiss Federal Chancellery. This enables AI agents to look up Swiss federal law, monitor legal changes, and analyse legislation directly in conversation — without manual research on fedlex.admin.ch.
+`fedlex-mcp` connects AI assistants (Claude) with three official Swiss SPARQL data sources:
 
-**Metaphor:** USB-C for federal law. Once connected, Claude can reach into the Systematic Compilation at any time.
+1. **Federal law** via the **Fedlex SPARQL endpoint** — the Systematic Compilation (SR), Official Compilation (AS), Federal Gazette (BBl) and treaties.
+2. **Consultations (Vernehmlassungen)** via the *same* Fedlex endpoint (`jolux:Consultation`) — the pre-parliamentary phase in which anyone can comment on a draft.
+3. **TERMDAT**, the Federal Chancellery's terminology database, via the **LINDAS SPARQL endpoint** — official term equivalents across de/fr/it/rm/en.
+
+All three are SPARQL-based, which is exactly why they live in one server rather than three: no new technology stack, only new queries against known patterns.
+
+**Metaphor:** USB-C for federal law. *Fedlex tells you what you have to respond to. TERMDAT tells you what it is called in the other national languages.*
 
 ---
 
 ## Features
 
-- :balance_scale: **7 tools, 2 resources** covering the full breadth of Swiss federal law
-- :mag: **SPARQL-powered** — direct access to the Fedlex linked data endpoint
-- :globe_with_meridians: **4 languages** — German, French, Italian, Romansh
-- :unlock: **No API key required** — all data under open reuse licence
+- :balance_scale: **12 tools, 2 resources** across federal law, consultations and terminology
+- :mag: **SPARQL-powered** — two isolated endpoints (Fedlex + LINDAS), no shared failure mode
+- :globe_with_meridians: **5 languages** — German, French, Italian, Romansh, plus English for terminology
+- :unlock: **No API key required** — all data under open reuse licences
 - :cloud: **Dual transport** — stdio (Claude Desktop) + Streamable HTTP (cloud)
+
+---
+
+## Anchor demo query
+
+> *"Which education-related consultations are currently open, until when does the deadline run, which office is in charge — and what are the key technical terms in French and Italian for the response?"*
+
+A single conversation chains three tools across two endpoints:
+
+```
+fedlex_get_open_consultations(keyword="Bildung")
+   → fedlex_get_consultation(event_id="proj/2026/71/cons_1")
+   → termdat_lookup_term(term="Volksschule", target_languages=["fr","it"])
+```
+
+Fedlex says *what* you must respond to and *by when*; TERMDAT says *how to name it* in the other national languages.
 
 ---
 
@@ -75,7 +97,8 @@ Try it immediately in Claude Desktop:
 
 > *"Show me all valid federal laws on vocational training"*
 > *"What does the Data Protection Act say? Is it still in force?"*
-> *"Which federal laws enter into force in the next 3 months?"*
+> *"Which consultations on education are open right now, and until when?"*
+> *"What is 'Volksschule' called in French and Italian in official terminology?"*
 
 ---
 
@@ -135,15 +158,20 @@ For use via **claude.ai in the browser** (e.g. on managed workstations without l
 
 ## Available Tools
 
-| Tool | Description |
-|------|-------------|
-| `fedlex_search_laws` | Search the Systematic Compilation (SR) by keyword in title |
-| `fedlex_get_law_by_sr` | Get a law by its SR number (e.g. `235.1` = Data Protection Act) |
-| `fedlex_get_recent_publications` | Latest publications from the Official Compilation (AS) |
-| `fedlex_get_upcoming_changes` | Laws entering into force soon (legal monitoring) |
-| `fedlex_search_gazette` | Search the Federal Gazette (BBl) |
-| `fedlex_get_law_history` | All versions of a law (version history) |
-| `fedlex_search_treaties` | International treaties (SR numbers starting with `0.`) |
+| # | Tool | Source | Description |
+|---|------|--------|-------------|
+| 1 | `fedlex_search_laws` | Fedlex | Search the Systematic Compilation (SR) by keyword in title |
+| 2 | `fedlex_get_law_by_sr` | Fedlex | Get a law by its SR number (e.g. `235.1` = Data Protection Act) |
+| 3 | `fedlex_get_recent_publications` | Fedlex | Latest publications from the Official Compilation (AS) |
+| 4 | `fedlex_get_upcoming_changes` | Fedlex | Laws entering into force soon (legal monitoring) |
+| 5 | `fedlex_search_gazette` | Fedlex | Search the Federal Gazette (BBl) |
+| 6 | `fedlex_get_law_history` | Fedlex | All versions of a law (version history) |
+| 7 | `fedlex_search_treaties` | Fedlex | International treaties (SR numbers starting with `0.`) |
+| 8 | `fedlex_get_open_consultations` | Fedlex | **Deadline monitoring** — open consultations, filtered by `eventEndDate >= today` |
+| 9 | `fedlex_search_consultations` | Fedlex | Full-text search over consultation title/description, with filters |
+| 10 | `fedlex_get_consultation` | Fedlex | Detail for one `eventId`: deadlines, office, status, documents |
+| 11 | `termdat_lookup_term` | LINDAS | Term → equivalents in de/fr/it/rm/en incl. definition |
+| 12 | `termdat_get_concept` | LINDAS | Full TERMDAT entry for a URI or ID |
 
 ### Example Use Cases
 
@@ -152,9 +180,12 @@ For use via **claude.ai in the browser** (e.g. on managed workstations without l
 | *"Show me all valid federal laws on vocational training"* | `fedlex_search_laws` |
 | *"What does the Data Protection Act say?"* | `fedlex_get_law_by_sr` |
 | *"Which laws enter into force in the next 3 months?"* | `fedlex_get_upcoming_changes` |
-| *"What did the Federal Council publish this week?"* | `fedlex_get_recent_publications` |
 | *"Show me the version history of the DSG"* | `fedlex_get_law_history` |
-| *"Which education treaties does Switzerland have with the EU?"* | `fedlex_search_treaties` |
+| *"Which consultations on education are open, and until when?"* | `fedlex_get_open_consultations` |
+| *"Find closed consultations about the language act"* | `fedlex_search_consultations` |
+| *"Give me the full detail and documents for consultation proj/2026/71/cons_1"* | `fedlex_get_consultation` |
+| *"What is 'Volksschule' called in French and Italian?"* | `termdat_lookup_term` |
+| *"Show the full TERMDAT entry 40109"* | `termdat_get_concept` |
 
 → More use cases by audience →
 
@@ -162,19 +193,28 @@ For use via **claude.ai in the browser** (e.g. on managed workstations without l
 
 ## Architecture
 
+Two isolated SPARQL endpoints behind one server. Separate httpx clients and
+timeouts mean a LINDAS outage never breaks the `fedlex_*` tools, and vice versa.
+
 ```
 +-------------------+     +------------------------------+     +--------------------------+
 |   Claude / AI     |---->|  Fedlex MCP                  |---->|  Fedlex SPARQL Endpoint  |
-|   (MCP Host)      |<----|  (MCP Server)                |<----|  (Swiss Federal          |
-+-------------------+     |                              |     |   Chancellery)           |
-                          |  7 Tools . 2 Resources       |     +--------------------------+
+|   (MCP Host)      |<----|  (MCP Server)                |<----|  fedlex.data.admin.ch    |
++-------------------+     |                              |     |  (law + consultations)   |
+                          |  12 Tools . 2 Resources      |     +--------------------------+
                           |  Stdio | SSE                 |
-                          |                              |
+                          |                              |     +--------------------------+
+                          |  Isolated clients:           |---->|  LINDAS SPARQL Endpoint  |
+                          |   - Fedlex  (law + cons.)     |<----|  lindas.admin.ch/query   |
+                          |   - LINDAS  (TERMDAT)         |     |  (fch/termdat, TERMDAT)  |
+                          |                              |     +--------------------------+
                           |  No authentication required  |
                           +------------------------------+
 ```
 
-### Data Model (JOLux Ontology)
+### Data Model
+
+**JOLux Ontology — federal law (Fedlex)**
 
 ```
 jolux:ConsolidationAbstract  <-  SR entry
@@ -183,14 +223,52 @@ jolux:ConsolidationAbstract  <-  SR entry
      +-- jolux:titleShort          "DSG"
      +-- jolux:historicalLegalId   "235.1"
 
-jolux:inForceStatus:
-  .../0  In force
-  .../1  No longer published in the SR
-  .../3  No longer in force
+jolux:inForceStatus:  .../0 In force  ·  .../1 No longer published in SR  ·  .../3 No longer in force
 ```
 
-**SPARQL Endpoint:** `https://fedlex.data.admin.ch/sparqlendpoint`
-**Licence:** Free reuse (commercial and other purposes) per [fedlex.admin.ch](https://www.fedlex.admin.ch/de/broadcasters)
+**JOLux Ontology — consultations (Fedlex, same endpoint)**
+
+```
+jolux:Consultation
+  +-- jolux:eventId               "proj/2026/71/cons_1"
+  +-- jolux:eventTitle            multilingual (de/fr/it)
+  +-- jolux:eventDescription      multilingual
+  +-- jolux:consultationStatus    -> vocabulary URI (0..6, /2 = "Laufend"/running)
+  +-- jolux:hasSubTask  ->  ?t
+        +-- jolux:eventStartDate
+        +-- jolux:eventEndDate                        <- the deadline
+        +-- jolux:institutionInChargeOfTheEvent       <- lead department
+        +-- jolux:institutionInChargeOfTheEventLevel2 <- lead office
+        +-- jolux:opinionHasDraftRelatedDocument      <- consultation documents
+```
+
+**schema.org — terminology (TERMDAT via LINDAS, graph `fch/termdat`)**
+
+```
+<concept>  = https://register.ld.admin.ch/termdat/40109      (a schema.ld.admin.ch/Term, ValidatedEntry)
+  +-- schema:name         preferred name per language (de/fr/it/en; rm effectively absent)
+  +-- schema:description  multilingual definition
+  +-- schema:hasPart  ->  <term> = .../termdat/40109/3/de     (synonym/variant, language + position suffix)
+```
+
+**SPARQL endpoints:** `https://fedlex.data.admin.ch/sparqlendpoint` · `https://lindas.admin.ch/query`
+**Licence:** Free reuse per [fedlex.admin.ch](https://www.fedlex.admin.ch/de/broadcasters); TERMDAT via LINDAS under open reuse.
+
+---
+
+## Architecture decision
+
+**ARCH A — live SPARQL only**, for all three data areas, consistent with the
+existing Fedlex integration (decided 2026-07-18).
+
+Both sources are unauthenticated SPARQL endpoints with acceptable latency, so no
+dump/offline fallback is needed: if the Fedlex endpoint is down the server cannot
+function anyway, and adding a cache would only mask that. LINDAS is a **separate**
+endpoint, and its outage must **not** degrade the `fedlex_*` tools.
+
+**Isolation requirement:** Fedlex and LINDAS use separate httpx clients, separate
+timeouts and separate error/status reporting. A LINDAS timeout cannot fail a
+`fedlex_*` call and vice versa (covered by an isolation test).
 
 ---
 
@@ -211,7 +289,7 @@ jolux:inForceStatus:
 fedlex-mcp/
 +-- src/fedlex_mcp/
 |   +-- __init__.py              # Package
-|   +-- server.py                # 7 tools, 2 resources
+|   +-- server.py                # 12 tools, 2 resources (Fedlex + LINDAS)
 +-- tests/
 |   +-- test_server.py           # Unit tests (mocked)
 +-- .github/workflows/ci.yml     # GitHub Actions (Python 3.11/3.12/3.13)
@@ -233,7 +311,64 @@ fedlex-mcp/
 - **SPARQL complexity:** Very broad keyword searches may time out (45s timeout)
 - **Language coverage:** German has the most complete data; other languages may have gaps
 - **Historical data:** Not all historical versions of laws have machine-readable metadata
-- **Rate limiting:** The Fedlex endpoint may throttle high-frequency requests
+- **Rate limiting:** The endpoints may throttle high-frequency requests
+
+### Consultations (Fedlex) — findings (verified 2026-07-18)
+
+| Query | Status | Records | Note |
+|---|---|---|---|
+| `COUNT(?s) {?s a jolux:Consultation}` | OK | **2,553** | full inventory |
+| `hasSubTask` with start/end dates | OK | 2,505 of 2,553 | **48 without any deadline** |
+| Open consultations (`eventEndDate >= today`) | OK | 8+ | deadlines into Sept. 2026 verified |
+| `consultation-status` vocabulary | OK | 7 values | `/0`..`/6`, `/2` = running |
+| `previousConsultationStatus` | OK | only 234 | sparse — not used as a filter |
+
+- **Quirk 1 — status alone is not enough.** Status `/2` ("Laufend"/running) and a
+  future `eventEndDate` are **two independent signals** that can diverge: some
+  entries are "running" with an already-expired deadline, and 48 have no deadline
+  at all. `fedlex_get_open_consultations` therefore filters **primarily on
+  `eventEndDate >= today`**, not on status. When the two signals disagree the
+  response is explicitly marked `status_conflict: true` rather than silently
+  resolved.
+
+### TERMDAT (LINDAS) — findings (verified 2026-07-18)
+
+| Query | Status | Records | Note |
+|---|---|---|---|
+| `COUNT(DISTINCT ?s) a schema.ld:Term` in graph | OK | **77,692** | |
+| Language tags on `schema:name` | OK | de/fr/it/en | `rm` effectively absent (0) |
+| Search `schema:name = "Volksschule"` | OK | 1 | returns term URI `…/termdat/40109/3/de` |
+| Concept URI `…/termdat/40109` | OK | – | 4 language variants + definition |
+
+- **Quirk 2 — reality-check discrepancy (stated plainly).** The Federal
+  Chancellery communicates roughly **400,000** TERMDAT entries. LINDAS contains
+  **77,692**. The difference is unexplained — presumably only the validated,
+  released subset is published as Linked Data. **A negative terminology hit does
+  not mean the term is missing from TERMDAT; it only means it is not in the LINDAS
+  subset.** Every TERMDAT response carries this note so the model draws no false
+  conclusion.
+- **Quirk 3 — two URI levels.** Concept URIs (`…/termdat/40109`) carry the
+  preferred names and the definition; term URIs with a language/position suffix
+  (`…/termdat/40109/3/de`) are synonyms/variants linked via `schema:hasPart`. The
+  tools accept both forms and normalise internally to the concept ID.
+
+---
+
+## Related processes across the portfolio
+
+Swiss federal legislation runs a chain, and this server covers one part of it —
+the pre-parliamentary consultation. The full chain is representable across three
+MCP servers:
+
+```
+Vernehmlassung  →  Botschaft  →  Parlament  →  Referendum
+(consultation)     (dispatch)    (debate)      (popular vote)
+   fedlex-mcp        fedlex-mcp    parlament-mcp   swiss-democracy-mcp
+```
+
+- **Consultation (pre-parliamentary):** this server — `fedlex_*consultation*` tools.
+- **Parliamentary phase:** [`parlament-mcp`](https://github.com/malkreide) — debates, motions, votes in the Federal Assembly.
+- **Popular vote / referendum:** [`swiss-democracy-mcp`](https://github.com/malkreide) — federal popular votes. Consultations are a distinct, earlier stage — no overlap, but the same legislative lifecycle.
 
 ---
 
@@ -279,10 +414,11 @@ pytest tests/ -m "live"
 
 ## Safety & Limits
 
-- **Read-only:** All tools perform SPARQL SELECT queries only — no data is written, modified, or deleted on the Fedlex endpoint.
-- **No personal data:** Fedlex contains public law texts and official gazettes. No personally identifiable information (PII) is processed or stored by this server.
-- **Rate limits:** The Fedlex SPARQL endpoint is a public service without a documented rate limit; use `limit` parameters conservatively. The server enforces a 45s timeout per request.
-- **Data freshness:** Results reflect the Fedlex endpoint at query time. No caching is performed by this server.
+- **Read-only:** All tools perform SPARQL SELECT queries only — no data is written, modified, or deleted on either endpoint. All 12 tools are annotated `readOnlyHint: true` / `destructiveHint: false` / `idempotentHint: true`.
+- **No personal data:** Fedlex holds public law, gazettes and consultation metadata; TERMDAT holds official terminology. No personally identifiable information (PII) is processed or stored by this server.
+- **Rate limits:** The Fedlex and LINDAS SPARQL endpoints are public services without a documented rate limit; use `limit` parameters conservatively (default 20, max 100). The server enforces a 45s timeout per request per endpoint and retries only transient failures.
+- **Endpoint isolation:** Fedlex and LINDAS use separate clients and timeouts — a LINDAS outage does not affect the `fedlex_*` tools.
+- **Data freshness:** Results reflect the endpoints at query time. No caching is performed by this server.
 - **Terms of service:** Data is subject to the reuse conditions of [fedlex.admin.ch](https://www.fedlex.admin.ch/de/broadcasters) — free reuse for commercial and other purposes.
 - **No guarantees:** This server is a community project, not affiliated with the Swiss Federal Chancellery. Availability depends on the upstream SPARQL endpoint.
 
@@ -321,7 +457,10 @@ Hayal Oezkan . [malkreide](https://github.com/malkreide)
 ## Credits & Related Projects
 
 - **Fedlex:** [fedlex.admin.ch](https://www.fedlex.admin.ch/) — Swiss Federal Chancellery
+- **TERMDAT / LINDAS:** [lindas.admin.ch](https://lindas.admin.ch/) — Linked Data service of the Swiss administration
 - **Protocol:** [Model Context Protocol](https://modelcontextprotocol.io/) — Anthropic / Linux Foundation
+- **Related:** [parlament-mcp](https://github.com/malkreide) — Swiss Federal Assembly (parliamentary phase)
+- **Related:** [swiss-democracy-mcp](https://github.com/malkreide) — Swiss federal popular votes (referendum phase)
 - **Related:** [swiss-cultural-heritage-mcp](https://github.com/malkreide/swiss-cultural-heritage-mcp) — Swiss cultural heritage data
 - **Related:** [zurich-opendata-mcp](https://github.com/malkreide/zurich-opendata-mcp) — City of Zurich open data
 - **Related:** [swiss-transport-mcp](https://github.com/malkreide/swiss-transport-mcp) — Swiss public transport

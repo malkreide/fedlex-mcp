@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-18
+
+Erweitert den Server um zwei zusätzliche, ebenfalls SPARQL-basierte Datenquellen
+— Vernehmlassungen (Fedlex) und die Terminologiedatenbank TERMDAT (via LINDAS).
+Von 7 auf 12 Tools; 2 Resources unverändert. Vollständig rückwärtskompatibel:
+die bestehenden `fedlex_*`-Tools und beide Resources bleiben unangetastet.
+
+> Hinweis zur Version: Der zugrunde liegende Auftrag nannte `0.2.0`; da das Repo
+> bereits auf `1.0.3` stand, wäre das ein Downgrade gewesen. Als
+> semver-konformer Minor-Bump für eine rückwärtskompatible Funktionserweiterung
+> ist es `1.1.0`.
+
+### Added
+- **Vernehmlassungen (Fedlex, `jolux:Consultation`)** — drei neue Tools:
+  - `fedlex_get_open_consultations` — Fristen-Monitoring; filtert **primär über
+    `eventEndDate >= heute`**, nicht über den Status (die beiden Signale sind
+    unabhängig). Sortiert nach Frist aufsteigend, optionaler `keyword`-Filter.
+    Leeres Resultat liefert eine explizite Sachaussage inkl. Prüfzeitpunkt statt
+    einer nackten leeren Liste.
+  - `fedlex_search_consultations` — Volltextsuche über `eventTitle`/
+    `eventDescription` mit Filtern für Status, Zeitraum (Frist) und
+    federführendes Amt.
+  - `fedlex_get_consultation` — Detail zu einer `eventId`: Fristen, Departement/
+    Amt, Status, Vernehmlassungsunterlagen (`opinionHasDraftRelatedDocument`),
+    betroffene Rechtsressource (`foreseenImpactToLegalResource`).
+- **TERMDAT (LINDAS, schema.org)** — zwei neue Tools:
+  - `termdat_lookup_term` — Begriff → Entsprechungen in de/fr/it/rm/en samt
+    Definition.
+  - `termdat_get_concept` — vollständiger Eintrag zu einer ID oder URI; akzeptiert
+    ID, Konzept-URI und Term-URI mit Sprachsuffix und normalisiert intern.
+- **Zweiter, isolierter SPARQL-Endpoint (LINDAS)** mit eigenem httpx-Client und
+  eigenem Timeout (ARCH A / Isolationspflicht): Ein LINDAS-Ausfall lässt die
+  `fedlex_*`-Tools unbeeinträchtigt und umgekehrt — getrennte Fehler-/Statusmeldung.
+- **Retry-Logik** für transiente Fehler (HTTP 429/502/503/504, Timeout, Netzwerk)
+  mit exponentiellem Backoff; deterministische Fehler (z.B. HTTP 400) werden
+  nicht wiederholt.
+- **TERMDAT-Attribution in jeder Response** (`source`-Feld + Markdown-Footer),
+  inkl. des Teilbestand-Hinweises (77'692 von ~400'000 Einträgen).
+- **Neue Tests** (respx-gemockt): Happy-Path je Tool, Retry bei 503, Timeout-/
+  Netzwerk-Masking, Endpoint-Isolation, Status-Frist-Konflikt (Quirk 1),
+  Consultation ohne `hasSubTask`, SPARQL-Escaping. Live-Tests gegen beide
+  Endpoints unter `-m live` (aus CI ausgeschlossen).
+
+### Changed
+- `fedlex://info`-Resource: Version, zweiter Endpoint, alle 12 Tools und die
+  Isolationsnotiz ergänzt (Resource-URI unverändert).
+- `handle_error` und der Response-Envelope tragen jetzt den betroffenen Dienst
+  (`Fedlex` vs. `TERMDAT (LINDAS)`), damit ein isolierter LINDAS-Fehler nicht als
+  Fedlex-Fehler gelesen wird.
+
+### Known findings
+Live verifiziert am 18.07.2026:
+
+**Vernehmlassungen (Fedlex)**
+- Gesamtbestand `jolux:Consultation`: **2 553**.
+- **48 von 2 553** Consultations haben keine `eventStartDate`/`eventEndDate`
+  (kein `hasSubTask` mit Fristen) → `deadline: null`, kein Tool-Fehler.
+- **Quirk 1:** Status «Laufend» (`consultation-status/2`) und eine Frist in der
+  Zukunft sind **unabhängige Signale**. Es gibt «laufende» Einträge mit
+  abgelaufener Frist. Die Tools filtern über die Frist und markieren
+  Widersprüche mit `status_conflict: true` statt sie stillschweigend aufzulösen.
+- `previousConsultationStatus` ist mit nur 234 Werten dünn besetzt und wird
+  nicht als Filter verwendet.
+
+**TERMDAT (LINDAS)**
+- **Quirk 2 (Reality-Check):** Die Bundeskanzlei kommuniziert ~400 000 TERMDAT-
+  Einträge; als Linked Data auf LINDAS liegen **77 692** (`schema.ld.admin.ch/Term`).
+  Die Differenz ist nicht erklärt — vermutlich ist nur der validierte/freigegebene
+  Teilbestand publiziert. Ein Negativtreffer bedeutet daher **nicht**, dass der
+  Begriff in TERMDAT fehlt, sondern nur, dass er nicht im LINDAS-Teilbestand liegt.
+  Dieser Hinweis steht in jeder TERMDAT-Response.
+- **Quirk 3 (zwei URI-Ebenen):** Konzept-URIs (`…/termdat/40109`) tragen die
+  bevorzugten Benennungen je Sprache, die Definition und via `schema:hasPart` die
+  Synonym-/Varianten-Term-URIs mit Sprach- und Positionssuffix (`…/40109/3/de`).
+  Beide Eingaben werden akzeptiert und intern auf die Konzept-ID normalisiert.
+- **`rm` (Rätoromanisch)** ist im LINDAS-Teilbestand faktisch nicht besetzt
+  (0 Namen) — als Zielsprache erlaubt, liefert aber in aller Regel keinen Treffer.
+
 ## [1.0.0] - 2026-06-03
 
 First production-ready release. Consolidates the `mcp-audit-skill` remediation
