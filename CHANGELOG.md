@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Refactor
+- **Geteilter SPARQL-/JSON-Client extrahiert** (`sparql_client.py`, vendored
+  Portfolio-Baustein). Der bisherige `_execute_sparql`-Retry-Kern ist jetzt eine
+  dünne Bindung an das wiederverwendbare Modul; `sparql_escape` / `val` daraus
+  re-exportiert, `RETRYABLE_STATUS` entfernt. Verhalten unverändert
+  (Retry/Backoff, Egress-Guard, `sparql_retry`-Log via Callback erhalten),
+  öffentliche Namen stabil, 76 Tests grün. Die Datei ist **byte-identisch** zur
+  Kopie in `swiss-environment-mcp` — bis ein installierbares `swiss-mcp-commons`
+  (PyPI/OIDC) existiert, sind die Kopien synchron zu halten.
+
 ## [1.1.0] - 2026-07-18
 
 Erweitert den Server um zwei zusätzliche, ebenfalls SPARQL-basierte Datenquellen
