@@ -36,7 +36,6 @@ MCP Protocol Version: ausgehandelt vom mcp-SDK (>=1.3.0); siehe README-Sektion
 "MCP Protocol Version".
 """
 
-import asyncio
 import hashlib
 import json
 import os
@@ -54,6 +53,8 @@ import structlog
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from . import sparql_client
 
 # ---------------------------------------------------------------------------
 # Konstanten
@@ -100,11 +101,11 @@ ATTRIBUTION_TERMDAT = (
 # gelistet — sein Ausfall isoliert (siehe run_lindas / _lindas_client).
 ALLOWED_EGRESS_HOSTS = frozenset({FEDLEX_DATA_HOST, LINDAS_HOST})
 
-# Transiente HTTP-Fehler, bei denen ein erneuter Versuch sinnvoll ist. 400/404
-# sind bewusst NICHT enthalten (deterministische Fehler, kein Retry).
-RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
-RETRY_MAX_ATTEMPTS = 3
-RETRY_BASE_DELAY = 0.5  # Sekunden; exponentielles Backoff 0.5s, 1.0s. Tests setzen 0.
+# Retry-Parameter für den geteilten SPARQL-Client (siehe sparql_client). 400/404
+# sind bewusst nicht retrybar (deterministisch). Werte werden pro Aufruf an
+# sparql_client übergeben; Tests monkeypatchen RETRY_BASE_DELAY auf 0.
+RETRY_MAX_ATTEMPTS = sparql_client.DEFAULT_MAX_ATTEMPTS
+RETRY_BASE_DELAY = sparql_client.DEFAULT_BASE_DELAY  # Sekunden. Tests setzen 0.
 
 # Whitelist-Pattern für Freitext-Suchbegriffe (SEC-018). Erlaubt Buchstaben
 # (inkl. Umlaute/Akzente via Unicode-\w), Ziffern, Leerzeichen und gängige
@@ -388,20 +389,9 @@ async def _fail(ctx: Context | None, tool: str, e: Exception, *,
     )
 
 
-def sparql_escape(value: str) -> str:
-    """Escaped einen String für die sichere Interpolation in ein SPARQL-Literal.
-
-    Verhindert das Ausbrechen aus doppelt-gequoteten SPARQL-Literalen
-    (SEC-004 / SEC-018). Wird zusätzlich zur Pydantic-Pattern-Validierung als
-    Defense-in-Depth angewandt.
-    """
-    return (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
+# Aus dem wiederverwendbaren Modul re-exportiert (SEC-004 / SEC-018,
+# Defense-in-Depth zusätzlich zur Pydantic-Pattern-Validierung).
+sparql_escape = sparql_client.sparql_escape
 
 
 def assert_host_allowed(url: str) -> None:
@@ -440,41 +430,31 @@ async def run_lindas(query: str, client: httpx.AsyncClient | None = None) -> lis
         return await _execute_sparql(tmp, LINDAS_ENDPOINT, query)
 
 
+def _log_sparql_retry(attempt: int, endpoint: str, exc: Exception) -> None:
+    """Retry-Callback für den geteilten Client (bewahrt das bisherige Logging)."""
+    log.info("sparql_retry", endpoint=endpoint, attempt=attempt, error_type=type(exc).__name__)
+
+
 async def _execute_sparql(client: httpx.AsyncClient, endpoint: str, query: str) -> list[dict]:
     """Sendet die Query an `endpoint` und gibt die Bindings zurück.
 
-    Wiederholt ausschliesslich transiente Fehler (RETRYABLE_STATUS,
-    Timeout/Netzwerk) mit exponentiellem Backoff; deterministische Fehler wie
-    HTTP 400 werden sofort durchgereicht. Der Ziel-Host wird vor jedem Versuch
-    gegen die Egress-Allow-List geprüft (SEC-021).
+    Dünne Bindung an den geteilten `sparql_client` (Egress-Guard, Retry nur bei
+    transienten Fehlern, exponentielles Backoff; deterministische 4xx sofort).
+    `RETRY_BASE_DELAY` wird zur Laufzeit gelesen (Tests monkeypatchen).
     """
-    assert_host_allowed(endpoint)
-    params = {"query": query, "format": "application/sparql-results+json"}
-    headers = {"Accept": "application/sparql-results+json"}
-    last_exc: Exception | None = None
-    for attempt in range(RETRY_MAX_ATTEMPTS):
-        try:
-            response = await client.get(endpoint, params=params, headers=headers)
-            response.raise_for_status()
-            return response.json().get("results", {}).get("bindings", [])
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code not in RETRYABLE_STATUS:
-                raise
-            last_exc = e
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
-            last_exc = e
-        if attempt < RETRY_MAX_ATTEMPTS - 1:
-            log.info("sparql_retry", endpoint=endpoint, attempt=attempt + 1,
-                     error_type=type(last_exc).__name__)
-            await asyncio.sleep(RETRY_BASE_DELAY * (2 ** attempt))
-    assert last_exc is not None  # pragma: no cover - Schleife garantiert gesetzt
-    raise last_exc
+    return await sparql_client.get_bindings(
+        client,
+        endpoint,
+        query,
+        base_delay=RETRY_BASE_DELAY,
+        max_attempts=RETRY_MAX_ATTEMPTS,
+        egress_check=assert_host_allowed,
+        on_retry=_log_sparql_retry,
+    )
 
 
-def val(binding: dict, key: str, default: str = "") -> str:
-    """Extrahiert sicher den String-Wert aus einem SPARQL-Binding."""
-    entry = binding.get(key)
-    return entry.get("value", default) if entry else default
+# SPARQL-Helfer aus dem wiederverwendbaren Modul (Rückwärtskompatibilität).
+val = sparql_client.binding_val
 
 
 def fedlex_url(uri: str, lang: str = "de") -> str:
