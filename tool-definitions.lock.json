@@ -1,5 +1,5 @@
 {
-  "sha256": "4590b8ca697e0376cd90c2a7dfd6ea89cb2649c903dea260d5af253fcade8350",
+  "sha256": "6b1542c5e751fee8f2b3e1c85c24bc737d1fe82bcc51281dd5964c4dfbb1fc1d",
   "tool_count": 12,
   "tools": [
     "fedlex_get_consultation",
@@ -15,5 +15,5 @@
     "termdat_get_concept",
     "termdat_lookup_term"
   ],
-  "generated_on": "2026-07-18"
+  "generated_on": "2026-07-20"
 }
