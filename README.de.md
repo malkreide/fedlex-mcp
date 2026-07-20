@@ -46,12 +46,23 @@ Alle drei sind SPARQL-basiert -- genau deshalb liegen sie in einem Server statt 
 Ein einziges Gespraech verkettet drei Tools ueber zwei Endpoints:
 
 ```
-fedlex_get_open_consultations(keyword="Bildung")
+fedlex_get_open_consultations(topic="education")
    → fedlex_get_consultation(event_id="proj/2026/71/cons_1")
    → termdat_lookup_term(term="Volksschule", target_languages=["fr","it"])
 ```
 
-Fedlex sagt, *worauf* man antworten muss und *bis wann*; TERMDAT sagt, *wie es heisst* in den anderen Landessprachen.
+Jede offene Vernehmlassung fuehrt `deadline`, `days_remaining` (zur Laufzeit in
+Europe/Zurich berechnet, `0` = Frist heute) und einen **abgeleiteten** `status`
+-- eine abgelaufene Vernehmlassung erscheint nie als laufend. Fedlex sagt,
+*worauf* man antworten muss und *bis wann*; TERMDAT sagt, *wie es heisst* in den
+anderen Landessprachen.
+
+> **`topic="education"` statt `keyword="Volksschule"`.** Fedlex-Vernehmlassungen
+> haben keine Sachgebiets-Taxonomie -- gefiltert wird per Freitext im Titel, und
+> das Wort «Volksschule» kommt in **null** Vernehmlassungstiteln vor. Der
+> `topic`-Filter expandiert zu einer ausgewiesenen Stichwort-Union (Bildung,
+> Schule, Berufsbildung, Hochschule, …) und nennt in der Antwort die gesuchten
+> Begriffe.
 
 ---
 
@@ -167,9 +178,9 @@ Fuer den Einsatz via **claude.ai im Browser** (z.B. auf verwalteten Arbeitsplaet
 | 5 | `fedlex_search_gazette` | Fedlex | Im Bundesblatt (BBl) suchen |
 | 6 | `fedlex_get_law_history` | Fedlex | Alle Fassungen eines Erlasses (Versionsgeschichte) |
 | 7 | `fedlex_search_treaties` | Fedlex | Staatsvertraege (SR-Nummern beginnen mit `0.`) |
-| 8 | `fedlex_get_open_consultations` | Fedlex | **Fristen-Monitoring** -- offene Vernehmlassungen, gefiltert ueber `eventEndDate >= heute` |
-| 9 | `fedlex_search_consultations` | Fedlex | Volltextsuche ueber Titel/Beschreibung von Vernehmlassungen, mit Filtern |
-| 10 | `fedlex_get_consultation` | Fedlex | Detail zu einer `eventId`: Fristen, Amt, Status, Unterlagen |
+| 8 | `fedlex_get_open_consultations` | Fedlex | **Fristen-Monitoring** -- offene Vernehmlassungen (`eventEndDate >= heute`, Europe/Zurich); je mit `days_remaining` + abgeleitetem `status`, sortiert nach kuerzester Restfrist; optional `topic`/`keyword` |
+| 9 | `fedlex_search_consultations` | Fedlex | Volltextsuche ueber Titel/Beschreibung, mit Filtern (topic, status, Fristzeitraum, Amt) |
+| 10 | `fedlex_get_consultation` | Fedlex | Detail zu einer `eventId`: Frist, `days_remaining`, Amt, abgeleiteter Status, Unterlagen |
 | 11 | `termdat_lookup_term` | LINDAS | Begriff → Entsprechungen in de/fr/it/rm/en inkl. Definition |
 | 12 | `termdat_get_concept` | LINDAS | Vollstaendiger TERMDAT-Eintrag zu einer URI oder ID |
 
@@ -233,15 +244,39 @@ jolux:inForceStatus:  .../0 In Kraft  ·  .../1 Nicht mehr in SR publiziert  · 
 jolux:Consultation
   +-- jolux:eventId               "proj/2026/71/cons_1"
   +-- jolux:eventTitle            mehrsprachig (de/fr/it)
-  +-- jolux:eventDescription      mehrsprachig
-  +-- jolux:consultationStatus    -> Vokabular-URI (0..6, /2 = «Laufend»)
+  +-- jolux:eventDescription            mehrsprachig
+  +-- jolux:consultationStatus          -> Vokabular-URI (0..6, /2 = «Laufend»)
+  +-- jolux:foreseenImpactToLegalResource  -> die betroffene Rechtsressource (Link zur SR)
   +-- jolux:hasSubTask  ->  ?t
-        +-- jolux:eventStartDate
-        +-- jolux:eventEndDate                        <- die Frist
+        +-- jolux:eventStartDate                      <- opened_on
+        +-- jolux:eventEndDate                        <- die Frist (xsd:date, Kalendertag)
         +-- jolux:institutionInChargeOfTheEvent       <- federfuehrendes Departement
         +-- jolux:institutionInChargeOfTheEventLevel2 <- federfuehrendes Amt
         +-- jolux:opinionHasDraftRelatedDocument      <- Vernehmlassungsunterlagen
 ```
+
+Es gibt **keine** Sachgebiets-Taxonomie auf `jolux:Consultation` -- thematische
+Filterung erfolgt per Freitext nur ueber `eventTitle`; `status` wird aus der
+Frist abgeleitet, nicht aus dem Quell-Statusfeld.
+
+**Gesetzgebungs-Lebenszyklus -- wo Vernehmlassungen stehen (alles in diesem Server):**
+
+```
+  Vernehmlassung            Bundesblatt (BBl)          Systematische Sammlung (SR)
+  (vorparlamentarisch) ───► (Botschaft / Erlasstext)─► (konsolidiertes Recht in Kraft)
+  ────────────────         ─────────────────────      ───────────────────────────
+  fedlex_get_open_          fedlex_search_gazette      fedlex_search_laws
+    consultations           (eli/fga/…)                fedlex_get_law_by_sr
+  fedlex_search_                                       fedlex_get_law_history
+    consultations                                      (eli/cc/…)
+  fedlex_get_consultation
+        │  jolux:foreseenImpactToLegalResource
+        └───────────────────────────────────────────► verknuepft eine Vernehmlassung
+                                                       mit der SR-Ressource, die sie aendert
+```
+
+Die Vernehmlassung ist der **frueheste** oeffentliche Einflusspunkt -- die Tools
+oben sagen *was offen ist und bis wann*, bevor eine Vorlage das Bundesblatt erreicht.
 
 **schema.org -- Terminologie (TERMDAT via LINDAS, Graph `fch/termdat`)**
 
@@ -316,23 +351,49 @@ fedlex-mcp/
 - **Historische Daten:** Nicht alle historischen Fassungen haben maschinenlesbare Metadaten
 - **Rate Limiting:** Die Endpoints koennen bei Hochfrequenz-Abfragen drosseln
 
-### Vernehmlassungen (Fedlex) -- Befunde (verifiziert am 18.07.2026)
+### Vernehmlassungen -- Geltungsbereich und Zuverlaessigkeit (zuerst lesen)
+
+- **Nur Bund. Keine kantonalen Vernehmlassungen.** Fedlex fuehrt *Bundes*-
+  Vernehmlassungen. Kantonale Vernehmlassungen -- fuer ein Schulamt oft die
+  relevanteren -- sind **nicht** in Fedlex und **nicht** abgedeckt. Das ist eine
+  harte Bereichsgrenze, kein umgehbarer Mangel.
+- **Kein Push-Dienst.** MCP ist Pull-basiert: Der Server sagt *auf Abruf*, was
+  laeuft und was bald auslaeuft. Er kann nicht benachrichtigen, terminieren oder
+  alarmieren. Die Wiederholung kommt von dir oder einem externen Scheduler --
+  nie vom Server. «Keine offenen Vernehmlassungen» heisst *jetzt nichts offen*,
+  nicht *nichts kommt*.
+- **Thematische Filterung ist Freitext -- und unscharf.** `jolux:Consultation`
+  hat **keine** Sachgebiets-Taxonomie (live verifiziert 2026-07-20) -- gefiltert
+  wird per Teilstring im Titel. `topic="education"` expandiert zu einer
+  ausgewiesenen Stichwort-Union und ueber-matcht bewusst (ein zu enger Filter
+  wuerde faelschlich beruhigen); es sind Falsch-Positive moeglich (z.B.
+  «Ausbildung» in einem unverwandten Titel) und, bei Nischenwortlaut, auch
+  Falsch-Negative. Die Antwort nennt stets die gesuchten Begriffe.
+- **Abdeckung / Latenz:** ~2 553 Vernehmlassungen; der historische Bestand
+  1960-1991 liegt beim Bundesarchiv, **ausserhalb dieses Scopes**. Neu
+  eroeffnete Vernehmlassungen erscheinen mit der Publikationslatenz von Fedlex
+  (nicht in Echtzeit).
+- **Fristen enden am Kalendertag** in Europe/Zurich; `days_remaining` wird zur
+  Laufzeit berechnet, nie gecacht. `0` = Frist endet heute.
+
+**Live-Befunde (verifiziert 2026-07-20):**
 
 | Abfrage | Status | Records | Bemerkung |
 |---|---|---|---|
 | `COUNT(?s) {?s a jolux:Consultation}` | OK | **2 553** | Gesamtbestand |
 | `hasSubTask` mit Start-/Enddatum | OK | 2 505 von 2 553 | **48 ohne Fristen** |
-| Offene Vernehmlassungen (`eventEndDate >= heute`) | OK | 8+ | Fristen bis Sept. 2026 verifiziert |
+| Offene Vernehmlassungen (`eventEndDate >= heute`) | OK | **42** | Fristen bis Herbst 2026 |
 | Status-Vokabular `consultation-status` | OK | 7 Werte | `/0`..`/6`, `/2` = «Laufend» |
-| `previousConsultationStatus` | OK | nur 234 | duenn besetzt -- nicht als Filter genutzt |
+| Titel enthaelt «volksschule» / «lehrplan» | OK | **0 / 0** | Ankerbegriff selbst findet nichts → `topic` nutzen |
+| Titel enthaelt «bildung» (einzeln) vs. `topic="education"` | OK | 44 vs. 66 | Stichwort-Union ist breiter |
+| `REGEX(LCASE(?t), "a\|b")`-Alternation | **KAPUTT** | 0 | auf diesem Endpoint still leer → OR-verkettetes `CONTAINS` |
 
-- **Quirk 1 -- der Status allein reicht nicht.** Status `/2` («Laufend») und ein
-  `eventEndDate` in der Zukunft sind **zwei unabhaengige Signale**, die
-  auseinanderlaufen koennen: Es gibt «laufende» Eintraege mit bereits abgelaufener
-  Frist, und 48 ohne jede Frist. `fedlex_get_open_consultations` filtert daher
-  **primaer ueber `eventEndDate >= heute`**, nicht ueber den Status. Widersprechen
-  sich die Signale, wird die Response explizit mit `status_conflict: true` markiert
-  statt stillschweigend aufgeloest.
+- **Quirk 1 -- die Frist gewinnt ueber das Statusfeld.** Status `/2` («Laufend»)
+  und `eventEndDate` sind **zwei unabhaengige Signale**. Der Server leitet
+  `status` aus dem **Datum** ab: Frist vorbei ⇒ `Abgeschlossen`, egal was das
+  Quellfeld sagt -- eine abgelaufene Vernehmlassung wird nie als laufend
+  gelistet. Widersprechen sich die Signale, wird der Datensatz mit
+  `status_conflict: true` markiert und behaelt das rohe Label in `status_source`.
 
 ### TERMDAT (LINDAS) -- Befunde (verifiziert am 18.07.2026)
 
@@ -355,6 +416,20 @@ fedlex-mcp/
   (`…/termdat/40109/3/de`) sind Synonyme/Varianten, verknuepft ueber
   `schema:hasPart`. Die Tools akzeptieren beide Formen und normalisieren intern auf
   die Konzept-ID.
+
+---
+
+## Was dieses Tool **nicht** ist
+
+- **Kein Abo, kein Alerting.** Es beobachtet nicht, benachrichtigt nicht,
+  erinnert nicht. Es antwortet auf Abruf. Jede wiederkehrende Pruefung steuerst
+  du oder ein externer Scheduler -- ausserhalb des Servers.
+- **Keine kantonale Quelle.** Nur Bundes-Vernehmlassungen -- siehe Bekannte
+  Einschraenkungen.
+- **Keine Rechtsberatung.** Geliefert werden oeffentliche Metadaten und Links zu
+  amtlichen Dokumenten. Frist und Status werden mechanisch aus den publizierten
+  Daten abgeleitet; entscheidungskritisches bitte gegen die verlinkte
+  Fedlex-Seite pruefen.
 
 ---
 

@@ -102,15 +102,15 @@ MCP-Enthusiast:innen, Forscher:innen, Prompt Engineers, öffentliche Verwaltung
 
 **Anchor-Demo: von der offenen Vernehmlassung zur mehrsprachigen Stellungnahme**
 «Welche Vernehmlassungen mit Bildungsbezug laufen aktuell, bis wann läuft die Frist, welches Amt ist federführend — und wie lauten die zentralen Fachbegriffe auf Französisch und Italienisch für die Stellungnahme?»
-→ `fedlex_get_open_consultations(keyword="Bildung")`
+→ `fedlex_get_open_consultations(topic="education")`
 → `fedlex_get_consultation(event_id="proj/2026/71/cons_1")`
 → `termdat_lookup_term(term="Volksschule", target_languages=["fr","it"])`
-*Warum nützlich:* Fedlex sagt, worauf man antworten muss und bis wann; TERMDAT sagt, wie man es in den anderen Landessprachen nennt. Die ganze Kette in einem Gespräch, über zwei SPARQL-Endpoints.
+*Warum nützlich:* Fedlex sagt, worauf man antworten muss und bis wann (jede offene Vorlage mit `days_remaining` in Europe/Zurich); TERMDAT sagt, wie man es in den anderen Landessprachen nennt. `topic="education"` statt `keyword="Volksschule"` — der Ankerbegriff selbst kommt in null Titeln vor; die gesuchte Stichwort-Union wird in der Antwort ausgewiesen.
 
 **Fristen-Monitoring**
 «Auf welche Bundesvorlagen kann man gerade noch Stellung nehmen, sortiert nach Frist?»
 → `fedlex_get_open_consultations(limit=20)`
-*Warum nützlich:* Filtert primär über die Frist (`eventEndDate >= heute`), nicht über den Status — und markiert Widersprüche zwischen Status und Frist mit `status_conflict: true`.
+*Warum nützlich:* Filtert über die Frist (`eventEndDate >= heute`, Europe/Zurich, Kalendertag), sortiert nach kürzester Restfrist. Jeder Treffer führt `days_remaining` (0 = heute) und einen abgeleiteten `status` — eine abgelaufene Vorlage erscheint nie als laufend; Widersprüche zum Quell-Status werden mit `status_conflict: true` markiert.
 
 **Portfolio-Synergie: Prozesskette Vernehmlassung → Parlament → Referendum**
 «Zeig mir die laufende Vernehmlassung zum Thema X, dann die parlamentarische Behandlung und schliesslich eine allfällige Volksabstimmung.»

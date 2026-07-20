@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-20
+
+Vertieft die Vernehmlassungs-Schicht auf ein fristenzentriertes Produkt: die
+Restfrist wird zur Kernaussage. Keine neuen Tools (bleibt bei 12); die drei
+bestehenden `fedlex_*consultation*`-Tools werden gehärtet. Vollständig
+rückwärtskompatibel für SR/AS/BBl/TERMDAT.
+
+### Added
+- **`days_remaining` in jeder Vernehmlassungs-Antwort**, zur Laufzeit berechnet
+  (nie gecacht, nie geschätzt) gegen **Europe/Zurich**. Kalendertag-Semantik:
+  `0` = Frist endet heute, negativ = abgelaufen. Zentral in einer testbaren
+  Funktion (`consultations.days_until` / `deadline_status`).
+- **Abgeleiteter `status` — die Frist gewinnt.** Sagt die Quelle «Laufend», die
+  Frist liegt aber in der Vergangenheit, wird der Status `Abgeschlossen`; das
+  rohe Quell-Label bleibt als `status_source` sichtbar, der Widerspruch als
+  `status_conflict: true`. Eine abgelaufene Vernehmlassung erscheint nie als
+  laufend.
+- **Typisiertes `Consultation`-Pydantic-v2-Modell** mit den Pflichtfeldern
+  `title, status, opened_on, deadline, days_remaining, lead_office, source_url,
+  retrieved_at, language`. `retrieved_at` (UTC) in jeder Antwort.
+- **Thematischer Filter `topic="education"`** — ausgewiesene Stichwort-Union
+  (Freitext im Titel; Fedlex hat keine Sachgebiets-Taxonomie). Die Antwort nennt
+  die tatsächlich gesuchten Begriffe (`message` + Markdown), damit klar ist,
+  wonach *nicht* gesucht wurde. Sortierung nach kürzester Restfrist als Default.
+- **Isoliertes `consultations`-Modul** — Vernehmlassungs-Logik (Uhr,
+  Fristenberechnung, Modell, Query-Bausteine, Themenfilter) getrennt von der
+  SR-/AS-/BBl-Schicht in `server.py`.
+- **Neue Tests** (respx + injizierbare Uhr): korrektes `days_remaining`,
+  Frist heute → `days_remaining == 0`, **Frist gestern → «Abgeschlossen», nicht
+  in der Liste laufender Verfahren** (SPARQL-Frist-Grenze + Sprach-Dedupe im
+  Query geprüft), Quelle «laufend» vs. Datum → Datum gewinnt, Themenfilter
+  findet Bildungsvorlage inkl. ausgewiesener Strategie, Endpoint nicht
+  erreichbar → erklärender Fehler statt leerem Resultat.
+
+### Known findings (live verifiziert 2026-07-20)
+- **`jolux:Consultation` hat keine Sachgebiets-/Klassifikations-Taxonomie** —
+  thematische Filterung ist ausschliesslich Freitext. Der Ankerbegriff
+  «Volksschule» kommt in 0 Titeln vor (`bildung` 44, `topic="education"`-Union
+  66; 42 aktuell offen).
+- **SPARQL-Quirk:** `REGEX(LCASE(...), "a|b")` liefert auf dem Fedlex-Endpoint
+  still **0** Treffer — Alternation daher über OR-verkettetes `CONTAINS`.
+- **`eventEndDate` ist `xsd:date`** (reiner Kalendertag, keine Uhrzeit/TZ) →
+  Vergleich gegen «heute in Europe/Zurich».
+- Scope-Grenze dokumentiert: **nur Bund, keine kantonalen Vernehmlassungen**;
+  kein Push-Mechanismus (MCP ist Pull-basiert).
+
 ### Refactor
 - **Geteilter SPARQL-/JSON-Client extrahiert** (`sparql_client.py`, vendored
   Portfolio-Baustein). Der bisherige `_execute_sparql`-Retry-Kern ist jetzt eine

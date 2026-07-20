@@ -44,7 +44,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -54,7 +54,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from . import sparql_client
+from . import consultations, sparql_client
 
 # ---------------------------------------------------------------------------
 # Konstanten
@@ -127,32 +127,17 @@ STATUS_LABELS = {
     STATUS_NO_LONGER_FORCE: "❌ Nicht mehr in Kraft",
 }
 
-# Vernehmlassungs-Status-Vokabular (verifiziert live am 18.07.2026 gegen
-# .../vocabulary/consultation-status/). Hart im Code hinterlegt, damit die
-# Tools keine zusätzliche Vokabular-Abfrage pro Aufruf brauchen.
-CONSULTATION_STATUS_BASE = "https://fedlex.data.admin.ch/vocabulary/consultation-status/"
-CONSULTATION_STATUS_RUNNING = CONSULTATION_STATUS_BASE + "2"
-CONSULTATION_STATUS_LABELS = {
-    CONSULTATION_STATUS_BASE + "0": "In Vorbereitung",
-    CONSULTATION_STATUS_BASE + "1": "Geplant",
-    CONSULTATION_STATUS_BASE + "2": "Laufend",
-    CONSULTATION_STATUS_BASE + "3": "Abgeschlossen – abwarten Stellungnahmen und/oder des Ergebnisberichts",
-    CONSULTATION_STATUS_BASE + "4": "Abgeschlossen – abwarten Ergebnisbericht",
-    CONSULTATION_STATUS_BASE + "5": "Abgeschlossen",
-    CONSULTATION_STATUS_BASE + "6": "Zurückgezogen",
-}
-# Freundliche Kurzcodes für den optionalen Status-Filter in
-# fedlex_search_consultations (User-Input → Vokabular-URI, keine Interpolation
-# von Freitext).
-CONSULTATION_STATUS_ALIASES = {
-    "in_preparation": CONSULTATION_STATUS_BASE + "0",
-    "planned": CONSULTATION_STATUS_BASE + "1",
-    "running": CONSULTATION_STATUS_BASE + "2",
-    "closed_awaiting_opinions": CONSULTATION_STATUS_BASE + "3",
-    "closed_awaiting_report": CONSULTATION_STATUS_BASE + "4",
-    "closed": CONSULTATION_STATUS_BASE + "5",
-    "withdrawn": CONSULTATION_STATUS_BASE + "6",
-}
+# Vernehmlassungs-Status-Vokabular und -Logik liegen in der isolierten
+# consultations-Schicht (getrennt von der SR-/AS-/BBl-Schicht). Hier nur
+# re-exportiert, damit bestehende Referenzen (`server.CONSULTATION_STATUS_*`)
+# stabil bleiben. Verifiziert live am 18.07.2026 gegen
+# .../vocabulary/consultation-status/.
+CONSULTATION_STATUS_BASE = consultations.CONSULTATION_STATUS_BASE
+CONSULTATION_STATUS_RUNNING = consultations.CONSULTATION_STATUS_RUNNING
+CONSULTATION_STATUS_LABELS = consultations.CONSULTATION_STATUS_LABELS
+CONSULTATION_STATUS_ALIASES = consultations.CONSULTATION_STATUS_ALIASES
+# Zentrale Europe/Zurich-Uhr (zur Laufzeit; Tests monkeypatchen diese Referenz).
+today_in_zurich = consultations.today_in_zurich
 
 # eventId einer Vernehmlassung, z.B. "proj/2026/71/cons_1". Strikte Whitelist,
 # damit nichts Injizierbares in ein SPARQL-Literal gelangt (SEC-018).
@@ -1280,80 +1265,44 @@ class TermLanguage(StrEnum):
 # ---------------------------------------------------------------------------
 # Helfer — Vernehmlassungen
 # ---------------------------------------------------------------------------
+# Die eigentliche Logik (zentrale Fristenberechnung, abgeleiteter Status,
+# typisiertes Modell, Query-Bausteine, Themenfilter) liegt im isolierten
+# consultations-Modul — getrennt von der SR-/AS-/BBl-Schicht. Hier nur
+# rückwärtskompatible Re-Exports und der Markdown-Renderer.
+consultation_status_label = consultations.CONSULTATION_STATUS_LABELS.get
+consultation_event_url = consultations.event_url
 
 
-def consultation_status_label(status_uri: str) -> str:
-    """Lesbares Label für einen consultation-status-URI (verifiziertes Mapping)."""
-    if not status_uri:
-        return "–"
-    return CONSULTATION_STATUS_LABELS.get(status_uri, f"({status_uri.rstrip('/').split('/')[-1]})")
-
-
-def _deadline_conflict(status_uri: str, end_date: str | None, today: str) -> bool | None:
-    """Quirk 1: Status und Frist sind unabhängige Signale — Frist gewinnt.
-
-    Gibt True zurück, wenn beide Signale vorhanden sind und sich widersprechen
-    (Status «Laufend», Frist aber abgelaufen — oder umgekehrt). None, wenn die
-    Frist fehlt (dann ist kein Abgleich möglich). Vgl. CHANGELOG.
-    """
-    if not end_date:
-        return None
-    is_open_by_deadline = end_date >= today
-    is_running_by_status = status_uri == CONSULTATION_STATUS_RUNNING
-    return is_open_by_deadline != is_running_by_status
-
-
-def consultation_event_url(event_id: str, lang: str = "de") -> str:
-    """fedlex.admin.ch-Link zu einem Vernehmlassungs-Projekt."""
-    return f"{FEDLEX_BASE_URL}/eli/dl/{event_id}/{lang}"
-
-
-def _consultation_record(b: dict, lang: str, today: str) -> dict:
-    """Baut einen strukturierten Vernehmlassungs-Datensatz aus einem Binding."""
-    event_id = val(b, "eventId")
-    status_uri = val(b, "status")
-    end_date = val(b, "end") or None
-    inst = val(b, "instLabel") or None
-    inst2 = val(b, "inst2Label") or None
-    conflict = _deadline_conflict(status_uri, end_date, today)
-    return {
-        "event_id": event_id,
-        "title": val(b, "title", "(kein Titel)"),
-        "status": consultation_status_label(status_uri) if status_uri else None,
-        "status_uri": status_uri or None,
-        "start_date": val(b, "start") or None,
-        "deadline": end_date,
-        "lead_department": inst,
-        "lead_office": inst2,
-        "status_conflict": bool(conflict) if conflict is not None else False,
-        "uri": val(b, "c") or None,
-        "url": consultation_event_url(event_id, lang) if event_id else None,
-    }
-
-
-def _consultation_select_body(lang: str, keyword_filter: str, extra: str = "") -> str:
-    """Gemeinsamer WHERE-Rumpf für Vernehmlassungs-Listen (Titel/Frist/Amt)."""
-    return f"""
-  ?c a jolux:Consultation ;
-     jolux:eventId ?eventId ;
-     jolux:eventTitle ?title .
-  OPTIONAL {{ ?c jolux:consultationStatus ?status . }}
-  OPTIONAL {{
-    ?c jolux:hasSubTask ?t .
-    OPTIONAL {{ ?t jolux:eventStartDate ?start . }}
-    OPTIONAL {{ ?t jolux:eventEndDate ?end . }}
-    OPTIONAL {{
-      ?t jolux:institutionInChargeOfTheEvent ?inst .
-      OPTIONAL {{ ?inst skos:prefLabel ?instLabel . FILTER(LANG(?instLabel) = "de") }}
-    }}
-    OPTIONAL {{
-      ?t jolux:institutionInChargeOfTheEventLevel2 ?inst2 .
-      OPTIONAL {{ ?inst2 skos:prefLabel ?inst2Label . FILTER(LANG(?inst2Label) = "de") }}
-    }}
-  }}
-  FILTER(LANG(?title) = "{lang}")
-  {keyword_filter}
-  {extra}"""
+def _consultation_line(r: consultations.Consultation, *, with_days: bool = True) -> str:
+    """Markdown-Zeilen für einen Vernehmlassungs-Datensatz (Liste)."""
+    flag = " ⚠️ status_conflict" if r.status_conflict else ""
+    deadline = r.deadline.isoformat() if r.deadline else "keine Frist"
+    if with_days and r.days_remaining is not None:
+        days = "heute" if r.days_remaining == 0 else (
+            f"in {r.days_remaining} Tagen" if r.days_remaining > 0
+            else f"vor {abs(r.days_remaining)} Tagen abgelaufen"
+        )
+        head = f"### 📅 Frist {deadline} ({days}) — {r.title}{flag}\n"
+    else:
+        head = f"### {r.title}{flag}\n"
+    md = head
+    md += f"- **Status:** {r.status}"
+    if r.days_remaining is not None:
+        md += f" | **days_remaining:** {r.days_remaining}"
+    md += "\n"
+    md += f"- **Frist:** {deadline}"
+    if r.opened_on:
+        md += f" | **Eröffnet:** {r.opened_on.isoformat()}"
+    md += "\n"
+    fed = r.lead_department or "–"
+    md += f"- **Federführung:** {fed}"
+    md += f" / {r.lead_office}\n" if r.lead_office else "\n"
+    if r.event_id:
+        md += f"- **eventId:** `{r.event_id}`\n"
+    if r.source_url:
+        md += f"- **Link:** [{r.source_url}]({r.source_url})\n"
+    md += "\n"
+    return md
 
 
 # ---------------------------------------------------------------------------
@@ -1408,8 +1357,15 @@ class GetOpenConsultationsInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     keyword: str | None = Field(
         default=None,
-        description="Optionaler Themenfilter im Titel, z.B. 'Bildung', 'Datenschutz'.",
+        description="Optionaler exakter Titel-Teilstring, z.B. 'Datenschutz'. Achtung: eng — "
+                    "'Volksschule' findet 0 Treffer. Für Bildungsthemen `topic='education'` nutzen.",
         min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+    )
+    topic: Literal["education"] | None = Field(
+        default=None,
+        description="Themen-Stichwort-Union (Freitext, keine Taxonomie). 'education' deckt "
+                    "Bildung/Schule/Berufsbildung/Hochschule/… ab; die gesuchten Begriffe "
+                    "werden in der Antwort ausgewiesen.",
     )
     language: Language = Field(default=Language.DE, description="Sprache des Titels: de, fr, it, rm")
     limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
@@ -1422,6 +1378,11 @@ class SearchConsultationsInput(BaseModel):
         default=None,
         description="Suchbegriff in Titel und Beschreibung. Ohne Begriff: neueste Vernehmlassungen.",
         min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+    )
+    topic: Literal["education"] | None = Field(
+        default=None,
+        description="Themen-Stichwort-Union (Freitext im Titel). Die gesuchten Begriffe werden "
+                    "in der Antwort ausgewiesen.",
     )
     status: Literal[
         "in_preparation", "planned", "running",
@@ -1488,11 +1449,14 @@ class TermdatGetConceptInput(BaseModel):
         "Listet aktuell OFFENE Vernehmlassungen des Bundes (Fristen-Monitoring).\n"
         "<use_case>«Auf welche Vorlagen kann man jetzt noch Stellung nehmen, und bis "
         "wann?» — vorparlamentarisches Verfahren, Frist-Überwachung.</use_case>\n"
-        "<important_notes>Filtert PRIMÄR über die Frist (eventEndDate >= heute), NICHT "
-        "über den Status — beide Signale sind unabhängig und werden bei Widerspruch mit "
-        "status_conflict=true markiert. Sortiert nach Frist aufsteigend. Optional per "
-        "keyword auf ein Thema eingrenzen.</important_notes>\n"
-        "<example>keyword='Bildung'</example>"
+        "<important_notes>Filtert über die Frist (eventEndDate >= heute in Europe/Zurich, "
+        "Fristtag inklusive), NICHT über den Status — die Frist ist massgebend. Jeder "
+        "Treffer führt deadline, days_remaining (zur Laufzeit berechnet, 0 = Frist heute) "
+        "und einen abgeleiteten status; bei Widerspruch zum Quell-Status status_conflict=true. "
+        "Sortiert nach kürzester Restfrist. Thema via topic='education' (ausgewiesene "
+        "Stichwort-Union) oder exaktem keyword. Leeres Resultat = «nichts offen», NICHT "
+        "«nichts kommt».</important_notes>\n"
+        "<example>topic='education'</example>"
     ),
     annotations={
         "title": "Offene Vernehmlassungen (Fristen-Monitoring)",
@@ -1505,69 +1469,61 @@ class TermdatGetConceptInput(BaseModel):
 async def fedlex_get_open_consultations(
     params: GetOpenConsultationsInput, ctx: Context | None = None
 ) -> FedlexResponse:
-    """Listet aktuell offene Vernehmlassungen, primär gefiltert über die Frist."""
+    """Listet aktuell offene Vernehmlassungen, gefiltert über die Frist."""
     tool = "fedlex_get_open_consultations"
     lang = params.language.value
-    today = date.today().isoformat()
-    checked_at = datetime.now(UTC).isoformat(timespec="seconds")
-    await _trace(ctx, tool, lang=lang, has_keyword=bool(params.keyword))
+    # Zentrale Europe/Zurich-Uhr, zur Laufzeit — nie gecacht, nie geschätzt.
+    today = today_in_zurich()
+    retrieved_at = consultations.now_iso()
+    terms = consultations.effective_terms(params.topic, params.keyword)
+    filter_note = consultations.describe_filter(params.topic, terms)
+    await _trace(ctx, tool, lang=lang, topic=params.topic, has_keyword=bool(params.keyword))
 
-    kw_filter = (
-        f'FILTER(CONTAINS(LCASE(STR(?title)), "{sparql_escape(params.keyword.lower())}"))'
-        if params.keyword else ""
-    )
-    # Status und Frist sind unabhängige Signale — Frist gewinnt. Vgl. CHANGELOG.
-    deadline_filter = f'FILTER(BOUND(?end) && xsd:date(?end) >= "{today}"^^xsd:date)'
-    query = f"""
-PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-SELECT DISTINCT ?c ?eventId ?title ?status ?start ?end ?instLabel ?inst2Label WHERE {{
-{_consultation_select_body(lang, kw_filter, deadline_filter)}
-}} ORDER BY ASC(?end)
-LIMIT {params.limit}
-"""
+    query = consultations.build_open_query(lang, terms, today, params.limit)
+    thema = f" zum Thema «{params.topic or params.keyword}»" if terms else ""
 
-    async with _tool_span(tool, lang=lang, has_keyword=bool(params.keyword)):
+    async with _tool_span(tool, lang=lang, topic=params.topic):
         try:
             bindings = await run_sparql(query)
 
-            kw_txt = f" zum Thema «{params.keyword}»" if params.keyword else ""
             if not bindings:
                 # Leeres Resultat ist eine Sachaussage, kein Fehler (ARCH-003):
-                # explizit mit Prüfzeitpunkt, damit das Modell nicht halluziniert.
+                # «nichts offen» heisst NICHT «nichts kommt».
                 msg = (
-                    f"Aktuell keine offenen Vernehmlassungen{kw_txt} mit diesem Filter; "
-                    f"zuletzt geprüft {checked_at}."
+                    f"Aktuell keine offenen Vernehmlassungen{thema}; "
+                    f"geprüft {retrieved_at} (heute {today.isoformat()}, Europe/Zurich)."
                 )
-                md = (
-                    f"## Vernehmlassungen — offen{kw_txt} [{lang.upper()}]\n\n{msg}"
-                    + no_match_hint(
-                        "**Tipps:** Ohne `keyword` erneut versuchen | mit "
-                        "`fedlex_search_consultations` auch abgeschlossene Verfahren durchsuchen."
-                    )
+                md = f"## Vernehmlassungen — offen{thema} [{lang.upper()}]\n\n{msg}\n"
+                if filter_note:
+                    md += f"\n_{filter_note}_\n"
+                md += no_match_hint(
+                    "**Tipps:** ohne Filter erneut versuchen | mit "
+                    "`fedlex_search_consultations` auch abgeschlossene Verfahren durchsuchen. "
+                    "«Keine offenen» heisst nicht «keine geplant» — MCP ist Pull-basiert, "
+                    "der Server pusht keine Benachrichtigungen."
                 )
                 return _empty(tool, md, source=ATTRIBUTION_FEDLEX, message=msg)
 
-            results = [_consultation_record(b, lang, today) for b in bindings]
-            conflicts = sum(1 for r in results if r["status_conflict"])
-            md = result_header(len(results), f"Offene Vernehmlassungen{kw_txt} [{lang.upper()}]")
-            md += f"_Frist-basiert (eventEndDate >= {today}); zuletzt geprüft {checked_at}._\n\n"
-            for r in results:
-                flag = " ⚠️ status_conflict" if r["status_conflict"] else ""
-                md += f"### 📅 Frist {r['deadline']} — {r['title']}{flag}\n"
-                md += f"- **Status:** {r['status'] or '–'}\n"
-                md += f"- **Federführung:** {r['lead_department'] or '–'}"
-                md += f" / {r['lead_office']}\n" if r["lead_office"] else "\n"
-                md += f"- **eventId:** `{r['event_id']}`\n"
-                md += f"- **Link:** [{r['url']}]({r['url']})\n\n"
+            records = consultations.records_from_bindings(bindings, lang, today, retrieved_at)
+            results = [r.model_dump(mode="json") for r in records]
+            conflicts = sum(1 for r in records if r.status_conflict)
+            md = result_header(len(records), f"Offene Vernehmlassungen{thema} [{lang.upper()}]")
+            md += (
+                f"_Frist-basiert (eventEndDate >= {today.isoformat()}, Europe/Zurich, "
+                f"Fristtag inklusive); sortiert nach kürzester Restfrist; "
+                f"retrieved_at {retrieved_at}._\n\n"
+            )
+            if filter_note:
+                md += f"_{filter_note}_\n\n"
+            for r in records:
+                md += _consultation_line(r)
             if conflicts:
                 md += (
                     f"> ⚠️ {conflicts} Eintrag/Einträge mit Status-Frist-Konflikt "
-                    "(Status widerspricht der Frist — die Frist ist massgebend).\n\n"
+                    "(Quell-Status widerspricht der Frist — die Frist ist massgebend).\n\n"
                 )
             md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
-            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX)
+            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX, message=filter_note)
 
         except Exception as e:
             return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
@@ -1579,11 +1535,12 @@ LIMIT {params.limit}
         "Volltextsuche über Vernehmlassungen (Titel und Beschreibung), mit Filtern.\n"
         "<use_case>Recherche im vorparlamentarischen Verfahren — auch abgeschlossene "
         "Vernehmlassungen, nach Status, Zeitraum oder federführendem Amt.</use_case>\n"
-        "<important_notes>Filter: status (Kurzcode), from_date/to_date auf die Frist, "
-        "institution (Teilstring im Departement/Amt). Ohne keyword: neueste Verfahren. "
-        "Für reines Fristen-Monitoring offener Verfahren "
+        "<important_notes>Filter: topic (Stichwort-Union, ausgewiesen), keyword (Titel+"
+        "Beschreibung), status (Kurzcode), from_date/to_date auf die Frist, institution "
+        "(Teilstring im Amt). status ist abgeleitet (Frist gewinnt), days_remaining zur "
+        "Laufzeit. Für reines Fristen-Monitoring offener Verfahren "
         "`fedlex_get_open_consultations` nutzen.</important_notes>\n"
-        "<example>keyword='Bildung', status='closed'</example>"
+        "<example>topic='education', status='closed'</example>"
     ),
     annotations={
         "title": "Vernehmlassungen durchsuchen",
@@ -1599,46 +1556,24 @@ async def fedlex_search_consultations(
     """Volltextsuche über Titel/Beschreibung von Vernehmlassungen, mit Filtern."""
     tool = "fedlex_search_consultations"
     lang = params.language.value
-    today = date.today().isoformat()
-    await _trace(ctx, tool, lang=lang, has_keyword=bool(params.keyword), status=params.status)
+    today = today_in_zurich()
+    retrieved_at = consultations.now_iso()
+    terms = consultations.effective_terms(params.topic, None)
+    filter_note = consultations.describe_filter(params.topic, terms)
+    status_uri = CONSULTATION_STATUS_ALIASES[params.status] if params.status else None
+    await _trace(ctx, tool, lang=lang, topic=params.topic, has_keyword=bool(params.keyword),
+                 status=params.status)
 
-    filters: list[str] = []
-    if params.keyword:
-        esc = sparql_escape(params.keyword.lower())
-        # Titel ODER Beschreibung (beide sprachbehaftet).
-        filters.append(
-            "OPTIONAL { ?c jolux:eventDescription ?desc . FILTER(LANG(?desc) = \"" + lang + "\") }\n"
-            f'  FILTER(CONTAINS(LCASE(STR(?title)), "{esc}") '
-            f'|| CONTAINS(LCASE(STR(COALESCE(?desc, ""))), "{esc}"))'
-        )
-    if params.status:
-        filters.append(f'FILTER(?status = <{CONSULTATION_STATUS_ALIASES[params.status]}>)')
-    if params.from_date:
-        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) >= "{params.from_date.isoformat()}"^^xsd:date)')
-    if params.to_date:
-        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) <= "{params.to_date.isoformat()}"^^xsd:date)')
-    if params.institution:
-        esc_inst = sparql_escape(params.institution.lower())
-        filters.append(
-            f'FILTER(CONTAINS(LCASE(STR(COALESCE(?instLabel, ?inst2Label, ""))), "{esc_inst}"))'
-        )
-    extra = "\n  ".join(filters)
-
-    query = f"""
-PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-SELECT DISTINCT ?c ?eventId ?title ?status ?start ?end ?instLabel ?inst2Label WHERE {{
-{_consultation_select_body(lang, "", extra)}
-}} ORDER BY DESC(?eventId)
-LIMIT {params.limit}
-"""
+    query = consultations.build_search_query(
+        lang, terms, params.keyword, status_uri,
+        params.from_date, params.to_date, params.institution, params.limit,
+    )
 
     async with _tool_span(tool, lang=lang, status=params.status):
         try:
             bindings = await run_sparql(query)
 
-            kw_txt = f"'{params.keyword}'" if params.keyword else "alle"
+            kw_txt = f"'{params.topic or params.keyword}'" if (params.topic or params.keyword) else "alle"
             if not bindings:
                 md = (
                     f"Keine Vernehmlassungen für {kw_txt} mit den gewählten Filtern [{lang.upper()}]."
@@ -1649,18 +1584,16 @@ LIMIT {params.limit}
                 )
                 return _empty(tool, md, source=ATTRIBUTION_FEDLEX)
 
-            results = [_consultation_record(b, lang, today) for b in bindings]
-            md = result_header(len(results), f"Vernehmlassungen {kw_txt} [{lang.upper()}]")
-            for r in results:
-                flag = " ⚠️ status_conflict" if r["status_conflict"] else ""
-                deadline = r["deadline"] or "keine Frist"
-                md += f"### {r['title']}{flag}\n"
-                md += f"- **Status:** {r['status'] or '–'} | **Frist:** {deadline}\n"
-                md += f"- **Federführung:** {r['lead_department'] or '–'}\n"
-                md += f"- **eventId:** `{r['event_id']}`\n"
-                md += f"- **Link:** [{r['url']}]({r['url']})\n\n"
+            records = consultations.records_from_bindings(bindings, lang, today, retrieved_at)
+            results = [r.model_dump(mode="json") for r in records]
+            md = result_header(len(records), f"Vernehmlassungen {kw_txt} [{lang.upper()}]")
+            md += f"_Status abgeleitet (Frist gewinnt); retrieved_at {retrieved_at}._\n\n"
+            if filter_note:
+                md += f"_{filter_note}_\n\n"
+            for r in records:
+                md += _consultation_line(r, with_days=False)
             md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
-            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX)
+            return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX, message=filter_note)
 
         except Exception as e:
             return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
@@ -1673,9 +1606,10 @@ LIMIT {params.limit}
         "<use_case>Vollbild zu einem Verfahren: Fristen, federführendes Amt, Status, "
         "Vernehmlassungsunterlagen und verknüpfte Rechtsressource — Grundlage für eine "
         "Stellungnahme.</use_case>\n"
-        "<important_notes>Ohne hasSubTask liefert das Tool deadline=null mit Hinweis "
-        "(wirft nicht). status_conflict markiert einen Widerspruch zwischen Status und "
-        "Frist. eventId z.B. aus fedlex_get_open_consultations.</important_notes>\n"
+        "<important_notes>Führt deadline, days_remaining (zur Laufzeit, Europe/Zurich) und "
+        "einen abgeleiteten status (Frist gewinnt). Ohne hasSubTask: deadline=null mit "
+        "Hinweis (wirft nicht). status_conflict markiert einen Widerspruch zwischen Quell-"
+        "Status und Frist. eventId z.B. aus fedlex_get_open_consultations.</important_notes>\n"
         "<example>event_id='proj/2026/71/cons_1'</example>"
     ),
     annotations={
@@ -1692,38 +1626,12 @@ async def fedlex_get_consultation(
     """Detail zu einer Vernehmlassung anhand ihrer eventId."""
     tool = "fedlex_get_consultation"
     lang = params.language.value
-    today = date.today().isoformat()
+    today = today_in_zurich()
+    retrieved_at = consultations.now_iso()
     event_id = params.event_id
     await _trace(ctx, tool, lang=lang, event_id=event_id)
 
-    esc_id = sparql_escape(event_id)
-    query = f"""
-PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-SELECT ?c ?title ?desc ?status ?start ?end ?instLabel ?inst2Label ?draft ?impact WHERE {{
-  ?c a jolux:Consultation ;
-     jolux:eventId "{esc_id}" .
-  OPTIONAL {{ ?c jolux:eventTitle ?title . FILTER(LANG(?title) = "{lang}") }}
-  OPTIONAL {{ ?c jolux:eventDescription ?desc . FILTER(LANG(?desc) = "{lang}") }}
-  OPTIONAL {{ ?c jolux:consultationStatus ?status . }}
-  OPTIONAL {{ ?c jolux:foreseenImpactToLegalResource ?impact . }}
-  OPTIONAL {{
-    ?c jolux:hasSubTask ?t .
-    OPTIONAL {{ ?t jolux:eventStartDate ?start . }}
-    OPTIONAL {{ ?t jolux:eventEndDate ?end . }}
-    OPTIONAL {{ ?t jolux:opinionHasDraftRelatedDocument ?draft . }}
-    OPTIONAL {{
-      ?t jolux:institutionInChargeOfTheEvent ?inst .
-      OPTIONAL {{ ?inst skos:prefLabel ?instLabel . FILTER(LANG(?instLabel) = "de") }}
-    }}
-    OPTIONAL {{
-      ?t jolux:institutionInChargeOfTheEventLevel2 ?inst2 .
-      OPTIONAL {{ ?inst2 skos:prefLabel ?inst2Label . FILTER(LANG(?inst2Label) = "de") }}
-    }}
-  }}
-}}
-LIMIT 200
-"""
+    query = consultations.build_detail_query(lang, event_id)
 
     async with _tool_span(tool, lang=lang, event_id=event_id):
         try:
@@ -1739,73 +1647,50 @@ LIMIT 200
                 )
                 return _empty(tool, md, source=ATTRIBUTION_FEDLEX)
 
-            # Bindings zu einem Datensatz aggregieren (mehrere Zeilen wegen
-            # mehrfacher Unterlagen/Institutionen).
-            first = bindings[0]
-            title = next((val(b, "title") for b in bindings if val(b, "title")), "(kein Titel)")
-            desc = next((val(b, "desc") for b in bindings if val(b, "desc")), None)
-            status_uri = next((val(b, "status") for b in bindings if val(b, "status")), "")
-            start = next((val(b, "start") for b in bindings if val(b, "start")), None)
-            end = next((val(b, "end") for b in bindings if val(b, "end")), None)
-            inst = next((val(b, "instLabel") for b in bindings if val(b, "instLabel")), None)
-            inst2 = next((val(b, "inst2Label") for b in bindings if val(b, "inst2Label")), None)
-            drafts = sorted({val(b, "draft") for b in bindings if val(b, "draft")})
-            impacts = sorted({val(b, "impact") for b in bindings if val(b, "impact")})
-            conflict = _deadline_conflict(status_uri, end, today)
-            has_subtask = bool(start or end or drafts or inst or inst2)
+            r, has_subtask = consultations.record_from_detail(
+                bindings, event_id, lang, today, retrieved_at
+            )
+            record = r.model_dump(mode="json")
 
-            record = {
-                "event_id": event_id,
-                "title": title,
-                "description": desc,
-                "status": consultation_status_label(status_uri) if status_uri else None,
-                "status_uri": status_uri or None,
-                "start_date": start,
-                "deadline": end,
-                "status_conflict": bool(conflict) if conflict is not None else False,
-                "lead_department": inst,
-                "lead_office": inst2,
-                "draft_documents": [{"uri": d, "url": fedlex_url(d, lang)} for d in drafts],
-                "related_legal_resource": [
-                    {"uri": i, "url": fedlex_url(i, lang)} for i in impacts
-                ],
-                "uri": val(first, "c") or None,
-                "url": consultation_event_url(event_id, lang),
-            }
-
-            md = f"## Vernehmlassung: {title}\n\n"
+            beginn = r.opened_on.isoformat() if r.opened_on else "–"
+            frist = r.deadline.isoformat() if r.deadline else None
+            md = f"## Vernehmlassung: {r.title}\n\n"
             md += "| Feld | Wert |\n|---|---|\n"
             md += f"| **eventId** | `{event_id}` |\n"
-            md += f"| **Status** | {record['status'] or '–'} |\n"
-            md += f"| **Beginn** | {start or '–'} |\n"
-            if end:
-                md += f"| **Frist (eventEndDate)** | {end} |\n"
+            md += f"| **Status (abgeleitet)** | {r.status} |\n"
+            if r.status_source and r.status_source != r.status:
+                md += f"| **Status (Quelle)** | {r.status_source} |\n"
+            md += f"| **Eröffnet (eventStartDate)** | {beginn} |\n"
+            if frist:
+                md += f"| **Frist (eventEndDate)** | {frist} |\n"
+                md += f"| **days_remaining** | {r.days_remaining} |\n"
             else:
                 md += "| **Frist (eventEndDate)** | – (keine Frist hinterlegt) |\n"
-            md += f"| **Federführendes Departement** | {inst or '–'} |\n"
-            md += f"| **Federführendes Amt** | {inst2 or '–'} |\n"
-            md += f"| **Status-Frist-Konflikt** | {'⚠️ ja' if record['status_conflict'] else 'nein'} |\n"
-            md += f"\n**Direktlink:** [{record['url']}]({record['url']})\n"
-            if desc:
-                md += f"\n**Beschreibung:** {desc}\n"
+            md += f"| **Federführendes Departement** | {r.lead_department or '–'} |\n"
+            md += f"| **Federführendes Amt** | {r.lead_office or '–'} |\n"
+            md += f"| **Status-Frist-Konflikt** | {'⚠️ ja' if r.status_conflict else 'nein'} |\n"
+            md += f"| **retrieved_at** | {retrieved_at} |\n"
+            md += f"\n**Direktlink:** [{r.source_url}]({r.source_url})\n"
+            if r.description:
+                md += f"\n**Beschreibung:** {r.description}\n"
             if not has_subtask:
                 md += (
                     "\n> ℹ️ Zu dieser Vernehmlassung ist keine Teilaufgabe (hasSubTask) "
                     "hinterlegt — daher keine Frist, keine Federführung, keine Unterlagen "
                     "(48 von 2553 Consultations betroffen).\n"
                 )
-            if record["status_conflict"]:
+            if r.status_conflict:
                 md += (
-                    "\n> ⚠️ **status_conflict:** Status und Frist widersprechen sich. "
+                    "\n> ⚠️ **status_conflict:** Quell-Status und Frist widersprechen sich. "
                     "Massgebend ist die Frist (eventEndDate), nicht der Status.\n"
                 )
-            if drafts:
-                md += f"\n### 📎 Vernehmlassungsunterlagen ({len(drafts)})\n"
-                for d in record["draft_documents"]:
+            if r.draft_documents:
+                md += f"\n### 📎 Vernehmlassungsunterlagen ({len(r.draft_documents)})\n"
+                for d in r.draft_documents:
                     md += f"- [{d['url']}]({d['url']})\n"
-            if impacts:
+            if r.related_legal_resource:
                 md += "\n### 🔗 Betroffene Rechtsressource\n"
-                for i in record["related_legal_resource"]:
+                for i in r.related_legal_resource:
                     md += f"- [{i['url']}]({i['url']})\n"
             md += f"\n---\n*{ATTRIBUTION_FEDLEX}*"
             return _ok(tool, [record], md, source=ATTRIBUTION_FEDLEX)
@@ -2103,7 +1988,7 @@ async def get_server_info() -> str:
     return json.dumps(
         {
             "name": "Fedlex MCP Server",
-            "version": "1.1.0",
+            "version": "1.2.0",
             "description": (
                 "Zugriff auf das Schweizer Bundesrecht, Vernehmlassungen (Fedlex) "
                 "und die Terminologiedatenbank TERMDAT (LINDAS) via SPARQL"

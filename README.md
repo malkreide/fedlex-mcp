@@ -46,12 +46,22 @@ All three are SPARQL-based, which is exactly why they live in one server rather 
 A single conversation chains three tools across two endpoints:
 
 ```
-fedlex_get_open_consultations(keyword="Bildung")
+fedlex_get_open_consultations(topic="education")
    → fedlex_get_consultation(event_id="proj/2026/71/cons_1")
    → termdat_lookup_term(term="Volksschule", target_languages=["fr","it"])
 ```
 
-Fedlex says *what* you must respond to and *by when*; TERMDAT says *how to name it* in the other national languages.
+Every open consultation carries `deadline`, `days_remaining` (computed at
+request time in Europe/Zurich, `0` = deadline is today) and a **derived**
+`status` — an expired consultation never shows up as running. Fedlex says
+*what* you must respond to and *by when*; TERMDAT says *how to name it* in the
+other national languages.
+
+> **Use `topic="education"`, not `keyword="Volksschule"`.** Fedlex consultations
+> have no subject taxonomy — filtering is free-text over the title, and the word
+> "Volksschule" appears in **zero** consultation titles. The `topic` filter
+> expands to a disclosed keyword union (Bildung, Schule, Berufsbildung,
+> Hochschule, …) and reports exactly which terms it searched.
 
 ---
 
@@ -167,9 +177,9 @@ For use via **claude.ai in the browser** (e.g. on managed workstations without l
 | 5 | `fedlex_search_gazette` | Fedlex | Search the Federal Gazette (BBl) |
 | 6 | `fedlex_get_law_history` | Fedlex | All versions of a law (version history) |
 | 7 | `fedlex_search_treaties` | Fedlex | International treaties (SR numbers starting with `0.`) |
-| 8 | `fedlex_get_open_consultations` | Fedlex | **Deadline monitoring** — open consultations, filtered by `eventEndDate >= today` |
-| 9 | `fedlex_search_consultations` | Fedlex | Full-text search over consultation title/description, with filters |
-| 10 | `fedlex_get_consultation` | Fedlex | Detail for one `eventId`: deadlines, office, status, documents |
+| 8 | `fedlex_get_open_consultations` | Fedlex | **Deadline monitoring** — open consultations (`eventEndDate >= today`, Europe/Zurich); each with `days_remaining` + derived `status`, sorted by shortest deadline; optional `topic`/`keyword` |
+| 9 | `fedlex_search_consultations` | Fedlex | Full-text search over consultation title/description, with filters (topic, status, deadline range, office) |
+| 10 | `fedlex_get_consultation` | Fedlex | Detail for one `eventId`: deadline, `days_remaining`, office, derived status, documents |
 | 11 | `termdat_lookup_term` | LINDAS | Term → equivalents in de/fr/it/rm/en incl. definition |
 | 12 | `termdat_get_concept` | LINDAS | Full TERMDAT entry for a URI or ID |
 
@@ -230,17 +240,41 @@ jolux:inForceStatus:  .../0 In force  ·  .../1 No longer published in SR  ·  .
 
 ```
 jolux:Consultation
-  +-- jolux:eventId               "proj/2026/71/cons_1"
-  +-- jolux:eventTitle            multilingual (de/fr/it)
-  +-- jolux:eventDescription      multilingual
-  +-- jolux:consultationStatus    -> vocabulary URI (0..6, /2 = "Laufend"/running)
+  +-- jolux:eventId                     "proj/2026/71/cons_1"
+  +-- jolux:eventTitle                  multilingual (de/fr/it)
+  +-- jolux:eventDescription            multilingual
+  +-- jolux:consultationStatus          -> vocabulary URI (0..6, /2 = "Laufend"/running)
+  +-- jolux:foreseenImpactToLegalResource  -> the legal resource it will amend (link to SR)
   +-- jolux:hasSubTask  ->  ?t
-        +-- jolux:eventStartDate
-        +-- jolux:eventEndDate                        <- the deadline
+        +-- jolux:eventStartDate                      <- opened_on
+        +-- jolux:eventEndDate                        <- the deadline (xsd:date, calendar day)
         +-- jolux:institutionInChargeOfTheEvent       <- lead department
         +-- jolux:institutionInChargeOfTheEventLevel2 <- lead office
         +-- jolux:opinionHasDraftRelatedDocument      <- consultation documents
 ```
+
+There is **no** subject taxonomy on `jolux:Consultation` — thematic filtering is
+free-text over `eventTitle` only, and `status` is derived from the deadline
+(not the source status field).
+
+**Legislative lifecycle — where consultations sit (all in this one server):**
+
+```
+  Vernehmlassung            Bundesblatt (BBl)          Systematische Sammlung (SR)
+  (consultation)     ─────► (dispatch / act text) ───► (consolidated law in force)
+  ────────────────         ─────────────────────      ───────────────────────────
+  fedlex_get_open_          fedlex_search_gazette      fedlex_search_laws
+    consultations           (eli/fga/…)                fedlex_get_law_by_sr
+  fedlex_search_                                       fedlex_get_law_history
+    consultations                                      (eli/cc/…)
+  fedlex_get_consultation
+        │  jolux:foreseenImpactToLegalResource
+        └───────────────────────────────────────────► links a consultation forward
+                                                       to the SR resource it amends
+```
+
+The consultation stage is the **earliest** public point of influence — the tools
+above answer *what is open and until when*, before a draft reaches the Bundesblatt.
 
 **schema.org — terminology (TERMDAT via LINDAS, graph `fch/termdat`)**
 
@@ -313,23 +347,48 @@ fedlex-mcp/
 - **Historical data:** Not all historical versions of laws have machine-readable metadata
 - **Rate limiting:** The endpoints may throttle high-frequency requests
 
-### Consultations (Fedlex) — findings (verified 2026-07-18)
+### Consultations — scope and reliability (read this before relying on it)
+
+- **Federal only. No cantonal consultations.** Fedlex holds *federal* (Bund)
+  consultations. Cantonal consultations — often the more relevant ones for a
+  school authority (Schulamt) — are **not** in Fedlex and **not** covered here.
+  This is a hard scope boundary, not a gap to be worked around.
+- **This is not a push service.** MCP is pull-based: the server answers *on
+  request* which consultations are open and which expire soon. It cannot notify,
+  schedule, or alert. Recurrence comes from you or an external scheduler — never
+  from the server. "No open consultations" means *nothing is open right now*, not
+  *nothing is coming*.
+- **Thematic filtering is free-text, and imperfect.** `jolux:Consultation` has
+  **no** subject/classification taxonomy (verified live 2026-07-20) — filtering
+  is substring search over the title only. `topic="education"` expands to a
+  disclosed keyword union and deliberately over-matches (a too-narrow filter
+  would falsely reassure); expect some false positives (e.g. "Ausbildung" inside
+  an unrelated title) and, for niche wording, possible false negatives. The
+  response always states which terms were searched.
+- **Coverage / latency:** ~2,553 consultations; the historical corpus 1960–1991
+  sits with the Federal Archives, **out of scope**. Newly opened consultations
+  appear with the upstream Fedlex publication latency (not real-time).
+- **Deadlines end on the calendar day** in Europe/Zurich; `days_remaining` is
+  computed at request time, never cached. `0` = the deadline is today.
+
+**Live findings (verified 2026-07-20):**
 
 | Query | Status | Records | Note |
 |---|---|---|---|
 | `COUNT(?s) {?s a jolux:Consultation}` | OK | **2,553** | full inventory |
 | `hasSubTask` with start/end dates | OK | 2,505 of 2,553 | **48 without any deadline** |
-| Open consultations (`eventEndDate >= today`) | OK | 8+ | deadlines into Sept. 2026 verified |
+| Open consultations (`eventEndDate >= today`) | OK | **42** | deadlines into autumn 2026 |
 | `consultation-status` vocabulary | OK | 7 values | `/0`..`/6`, `/2` = running |
-| `previousConsultationStatus` | OK | only 234 | sparse — not used as a filter |
+| Title contains "volksschule" / "lehrplan" | OK | **0 / 0** | anchor term itself finds nothing → use `topic` |
+| Title contains "bildung" (single) vs `topic="education"` union | OK | 44 vs 66 | keyword union is broader |
+| `REGEX(LCASE(?t), "a\|b")` alternation | **BROKEN** | 0 | silently empty on this endpoint → OR-chained `CONTAINS` instead |
 
-- **Quirk 1 — status alone is not enough.** Status `/2` ("Laufend"/running) and a
-  future `eventEndDate` are **two independent signals** that can diverge: some
-  entries are "running" with an already-expired deadline, and 48 have no deadline
-  at all. `fedlex_get_open_consultations` therefore filters **primarily on
-  `eventEndDate >= today`**, not on status. When the two signals disagree the
-  response is explicitly marked `status_conflict: true` rather than silently
-  resolved.
+- **Quirk 1 — the deadline wins over the status field.** Status `/2`
+  ("Laufend"/running) and `eventEndDate` are **two independent signals**. The
+  server derives `status` from the **date**: past deadline ⇒ `Abgeschlossen`,
+  regardless of what the source status claims — so an expired consultation is
+  never listed as running. When the two disagree the record is marked
+  `status_conflict: true` and keeps the raw label in `status_source`.
 
 ### TERMDAT (LINDAS) — findings (verified 2026-07-18)
 
@@ -351,6 +410,19 @@ fedlex-mcp/
   preferred names and the definition; term URIs with a language/position suffix
   (`…/termdat/40109/3/de`) are synonyms/variants linked via `schema:hasPart`. The
   tools accept both forms and normalise internally to the concept ID.
+
+---
+
+## What this tool is **not**
+
+- **Not a subscription or alerting service.** It does not watch, notify, e-mail,
+  or remind. It answers when asked. Any recurring check is driven by you or an
+  external scheduler, outside the server.
+- **Not a cantonal source.** Federal (Bund) consultations only — see Known
+  Limitations.
+- **Not legal advice.** It returns public metadata and links to official
+  documents. Deadlines and status are derived mechanically from the published
+  data; verify anything decision-critical against the linked Fedlex page.
 
 ---
 

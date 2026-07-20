@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -23,7 +24,7 @@ import pytest
 import respx
 from pydantic import ValidationError
 
-from fedlex_mcp import server
+from fedlex_mcp import consultations, server
 from fedlex_mcp.server import (
     GetConsultationInput,
     GetLawBySrInput,
@@ -395,7 +396,8 @@ async def test_open_consultations_empty_states_timestamp() -> None:
     assert resp.match_type == "none"
     assert resp.count == 0
     assert "keine offenen Vernehmlassungen" in resp.message
-    assert "zuletzt geprüft" in resp.message
+    assert "geprüft" in resp.message
+    assert "Europe/Zurich" in resp.message
 
 
 @respx.mock
@@ -524,13 +526,35 @@ async def test_quirk1_status_running_but_deadline_past_flags_conflict() -> None:
     assert "status_conflict" in resp.markdown
 
 
-def test_deadline_conflict_pure() -> None:
-    running = server.CONSULTATION_STATUS_RUNNING
-    closed = server.CONSULTATION_STATUS_BASE + "5"
-    assert server._deadline_conflict(running, "2020-01-01", "2026-07-18") is True
-    assert server._deadline_conflict(running, "2099-01-01", "2026-07-18") is False
-    assert server._deadline_conflict(closed, "2099-01-01", "2026-07-18") is True
-    assert server._deadline_conflict(running, None, "2026-07-18") is None
+def test_deadline_status_pure_date_wins() -> None:
+    """Zentrale Fristenlogik: die Frist gewinnt über das Quell-Statusfeld."""
+    running = consultations.CONSULTATION_STATUS_RUNNING
+    closed = consultations.CONSULTATION_STATUS_BASE + "5"
+    today = date(2026, 7, 20)
+
+    # Quelle «Laufend», Frist abgelaufen → abgeleitet «Abgeschlossen», Konflikt.
+    status, is_open, conflict = consultations.deadline_status(date(2020, 1, 1), running, today)
+    assert (status, is_open, conflict) == (consultations.DERIVED_CLOSED, False, True)
+
+    # Quelle «Laufend», Frist künftig → «Laufend», kein Konflikt.
+    status, is_open, conflict = consultations.deadline_status(date(2099, 1, 1), running, today)
+    assert (status, is_open, conflict) == (consultations.DERIVED_RUNNING, True, False)
+
+    # Quelle «Abgeschlossen», Frist künftig → «Laufend» (Datum gewinnt), Konflikt.
+    status, is_open, conflict = consultations.deadline_status(date(2099, 1, 1), closed, today)
+    assert (status, is_open, conflict) == (consultations.DERIVED_RUNNING, True, True)
+
+    # Keine Frist → Rückfall auf Quell-Label, is_open False, kein Konflikt.
+    status, is_open, conflict = consultations.deadline_status(None, running, today)
+    assert (status, is_open, conflict) == ("Laufend", False, False)
+
+
+def test_days_until_pure_calendar_semantics() -> None:
+    today = date(2026, 7, 20)
+    assert consultations.days_until(date(2026, 7, 25), today) == 5
+    assert consultations.days_until(date(2026, 7, 20), today) == 0   # Frist heute
+    assert consultations.days_until(date(2026, 7, 19), today) == -1  # gestern abgelaufen
+    assert consultations.days_until(None, today) is None
 
 
 # --- Quirk: consultation without hasSubTask --------------------------------
@@ -660,6 +684,125 @@ def test_lindas_client_default_is_none_outside_lifespan() -> None:
 def test_lindas_host_on_egress_allow_list() -> None:
     assert server.LINDAS_HOST in server.ALLOWED_EGRESS_HOSTS
     server.assert_host_allowed(server.LINDAS_ENDPOINT)  # no raise
+
+
+# ===========================================================================
+# Fristenlogik mit fixiertem «heute» (injizierbare Uhr statt Systemzeit)
+# ===========================================================================
+# Alle Tools lesen «heute» über server.today_in_zurich(); der Fixture friert
+# diese Referenz ein, damit days_remaining/Status deterministisch prüfbar sind.
+
+FROZEN_TODAY = date(2026, 7, 20)
+
+
+@pytest.fixture
+def frozen_today(monkeypatch: pytest.MonkeyPatch) -> date:
+    monkeypatch.setattr(server, "today_in_zurich", lambda: FROZEN_TODAY)
+    return FROZEN_TODAY
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_open_running_has_correct_days_remaining(frozen_today: date) -> None:
+    # Pflichtfall 1: laufende Vernehmlassung → korrektes days_remaining.
+    respx.get(ENDPOINT).mock(return_value=_sparql_response([_open_cons_binding("2026-07-25")]))
+    resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
+    r = resp.results[0]
+    assert r["days_remaining"] == 5
+    assert r["status"] == "Laufend"
+    assert r["is_open"] is True
+    assert "days_remaining" in resp.markdown
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_deadline_today_is_open_zero_days(frozen_today: date) -> None:
+    # Pflichtfall 3: Frist heute → laufend, days_remaining == 0.
+    respx.get(ENDPOINT).mock(return_value=_sparql_response([_open_cons_binding("2026-07-20")]))
+    resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
+    r = resp.results[0]
+    assert r["days_remaining"] == 0
+    assert r["status"] == "Laufend"
+    assert r["is_open"] is True
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_deadline_yesterday_closed_and_date_wins(frozen_today: date) -> None:
+    # Pflichtfälle 2 & 4: Frist gestern abgelaufen, Quelle meldet «Laufend» →
+    # Status «Abgeschlossen» (Datum gewinnt), Diskrepanz ausgewiesen.
+    respx.get(ENDPOINT).mock(return_value=_sparql_response([
+        _binding(c=CONS_URI, title="Abgelaufene Vorlage",
+                 status=server.CONSULTATION_STATUS_RUNNING, start="2026-05-01", end="2026-07-19",
+                 instLabel="Departement"),
+    ]))
+    resp = await server.fedlex_get_consultation(GetConsultationInput(event_id="proj/2026/71/cons_1"))
+    r = resp.results[0]
+    assert r["status"] == "Abgeschlossen"       # Datum gewinnt, nicht «Laufend»
+    assert r["status_source"] == "Laufend"      # rohes Quell-Label bleibt sichtbar
+    assert r["days_remaining"] == -1
+    assert r["is_open"] is False
+    assert r["status_conflict"] is True
+    assert "status_conflict" in resp.markdown
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_open_query_excludes_expired_and_dedupes_language(frozen_today: date) -> None:
+    # Pflichtfall 2 (Kern): abgelaufene Verfahren dürfen gar nicht erst in der
+    # Liste der laufenden erscheinen — die SPARQL-Frist-Grenze filtert sie weg.
+    # Pflichtfall 6: der Sprachfilter entfernt die DE/FR/IT-Dreifach-Duplikate.
+    captured: dict = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        captured["query"] = request.url.params.get("query")
+        return _sparql_response([])
+
+    respx.get(ENDPOINT).mock(side_effect=_capture)
+    await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
+    q = captured["query"]
+    assert 'xsd:date(?end) >= "2026-07-20"^^xsd:date' in q  # Frist-Grenze = heute
+    assert 'FILTER(LANG(?title) = "de")' in q               # Sprach-Dedupe
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_topic_education_finds_known_template_and_discloses_strategy(frozen_today: date) -> None:
+    # Pflichtfall 5: Themenfilter findet eine bekannte Bildungsvorlage; die
+    # verwendete Stichwortstrategie wird in der Antwort ausgewiesen.
+    respx.get(ENDPOINT).mock(return_value=_sparql_response([
+        _open_cons_binding("2026-09-01", title="Totalrevision Berufsbildungsgesetz"),
+    ]))
+    resp = await server.fedlex_get_open_consultations(
+        GetOpenConsultationsInput(topic="education")
+    )
+    assert resp.count == 1
+    assert "Berufsbildungsgesetz" in resp.markdown
+    assert "Themenfilter" in resp.markdown
+    assert "berufsbildung" in resp.message  # ausgewiesene Begriffs-Union
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_open_consultations_endpoint_unreachable_explains(frozen_today: date,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    # Pflichtfall 7: Endpoint nicht erreichbar → erklärender Fehler, kein leeres
+    # (fälschlich beruhigendes) Resultat.
+    monkeypatch.setattr(server, "RETRY_BASE_DELAY", 0)
+    respx.get(ENDPOINT).mock(side_effect=httpx.ConnectError("network down"))
+    resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
+    assert resp.match_type == "error"          # NICHT "none"
+    assert "Verbindung zu Fedlex" in resp.markdown
+    assert "network down" not in resp.markdown
+
+
+def test_consultation_model_has_mandatory_fields() -> None:
+    """Das typisierte Modell führt alle spezifizierten Pflichtfelder."""
+    required = {
+        "title", "status", "opened_on", "deadline", "days_remaining",
+        "lead_office", "source_url", "retrieved_at", "language",
+    }
+    assert required <= set(consultations.Consultation.model_fields)
 
 
 # ---------------------------------------------------------------------------
