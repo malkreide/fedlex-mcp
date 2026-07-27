@@ -502,15 +502,15 @@ See [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## Security
-
-See [SECURITY.md](SECURITY.md) for the security posture, hardening controls, and how to report a vulnerability.
-
----
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md)
+
+---
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the security posture, hardening controls, and how to report a vulnerability.
 
 ---
 
