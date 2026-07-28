@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Behoben
+
+- **`mcp` auf `<2` begrenzt.** `mcp` 2.0.0, veröffentlicht am 28.07.2026, hat
+  `mcp.server.fastmcp` entfernt — genau das Modul, das dieser Server importiert.
+  Mit dem bisherigen offenen `>=1.28.1` wählte jede frische Auflösung 2.0.0 und
+  scheiterte beim Import mit `ModuleNotFoundError`, in der CI ebenso wie bei
+  jedem `pip install`. In beide Richtungen verifiziert: 2.0.0 scheitert, `<2`
+  löst auf 1.29.0 auf und importiert sauber. Die Migration auf die 2.x-API
+  (`mcp.server.mcpserver`) bleibt eine eigene, bewusste Aufgabe.
+
 ## [1.2.0] - 2026-07-20
 
 Vertieft die Vernehmlassungs-Schicht auf ein fristenzentriertes Produkt: die
