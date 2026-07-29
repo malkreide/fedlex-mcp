@@ -31,7 +31,7 @@ dependencies = [
     # `>=1.28.1` breaks every fresh install — CI and `pip install` alike.
     # Migrating to the 2.x API is real work and a decision to take on purpose,
     # not one a resolver should make silently.
-    "mcp[cli]>=1.28.1,<2",
+    "mcp[cli]>=2.0.0,<3",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.0.0",

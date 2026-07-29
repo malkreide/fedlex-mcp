@@ -50,7 +50,7 @@ from typing import Any, Literal
 
 import httpx
 import structlog
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -305,7 +305,7 @@ _lindas_client: httpx.AsyncClient | None = None
 
 
 @asynccontextmanager
-async def lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
+async def lifespan(_server: MCPServer) -> AsyncIterator[AppContext]:
     """Erstellt die geteilten HTTP-Clients (Fedlex + LINDAS) und schliesst sie."""
     global _http_client, _lindas_client
     _init_tracing()
@@ -499,7 +499,7 @@ def no_match_hint(tips: str) -> str:
 # Server-Initialisierung
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(
+mcp = MCPServer(
     "fedlex_mcp",
     instructions=(
         "MCP-Server für das Schweizer Bundesrecht (Fedlex). "
@@ -2046,9 +2046,14 @@ async def compute_tool_signature_hash() -> str:
         payload.append({
             "name": t.name,
             "description": t.description,
-            "inputSchema": t.inputSchema,
-            "outputSchema": getattr(t, "outputSchema", None),
-            "annotations": ann.model_dump(mode="json") if ann is not None else None,
+            "inputSchema": t.input_schema,
+            "outputSchema": getattr(t, "output_schema", None),
+            # by_alias keeps the wire spelling (readOnlyHint, ...): mcp_types
+            # 2.x renamed the Python fields to snake_case, and a bare dump
+            # would silently change this hash without any contract change.
+            "annotations": (
+                ann.model_dump(mode="json", by_alias=True) if ann is not None else None
+            ),
         })
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -2077,7 +2082,7 @@ def _apply_tool_allowlist() -> None:
         for name in removed:
             registry.pop(name, None)
         log.info("tool_allowlist_applied", enabled=sorted(enabled), removed=sorted(removed))
-    except Exception:  # pragma: no cover - interne FastMCP-API nicht verfügbar
+    except Exception:  # pragma: no cover - interne MCPServer-API nicht verfügbar
         log.warning("tool_allowlist_unsupported")
 
 
