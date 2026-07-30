@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Streamable-HTTP wies unter jedem echten Hostnamen mit 421 ab (SEC-005).**
+  `_run_http()` baute die App mit `mcp.streamable_http_app()` ohne `host` — und
+  zwar **bevor** Host und Port überhaupt aufgelöst waren. Der Bind konnte also
+  gar nicht ankommen. Unter mcp 2.x ist das kein neutraler Default: das SDK
+  leitet aus dem App-Argument seine Host-Allow-List ab und aktiviert bei
+  loopback-artigem Wert automatisch `127.0.0.1:*`. Da der Default `127.0.0.1`
+  ist, traf das jeden Start mit `FEDLEX_HOST=0.0.0.0`.
+
+  Der Bind wird jetzt zuerst ermittelt (`resolve_http_bind()`) und dann an beide
+  Abnehmer gegeben — uvicorn und die App. Eine echte Allow-List entsteht aus dem
+  neuen `FEDLEX_ALLOWED_HOSTS`; ohne diese Variable bleibt der Schutz auf einem
+  Nicht-Loopback-Bind bewusst aus und der Aufrufer warnt.
+
+  13 neue Tests, darunter der tragende Fall „richtiger Hostname, falscher Port"
+  und einer, der die Bind-Auflösung festnagelt (`PORT` schlägt `--port`, `--port`
+  schlägt die Settings) — sonst könnte die App später wieder einen anderen Wert
+  sehen als uvicorn. Mutationsgetestet: nimmt man den `host`-Kwarg wieder weg,
+  reproduziert der Test das 421.
+
+  Geprüft mit den wörtlichen CI-Kommandos: 94 passed / 3 deselected,
+  `ruff check src/ tests/` clean.
+
+
 ### Behoben
 
 - **`mcp` auf `<2` begrenzt.** `mcp` 2.0.0, veröffentlicht am 28.07.2026, hat

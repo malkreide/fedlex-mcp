@@ -249,6 +249,10 @@ class Settings(BaseSettings):
     port: int = 8000
     # Kommagetrennte Origin-Liste; in Produktion explizit setzen, kein "*".
     allowed_origins: str = "http://localhost,http://127.0.0.1"
+    # SEC-005, eingehend: Hostnamen, unter denen dieser Server erreichbar ist.
+    # Nötig für die Host/Origin-Prüfung des Transports, sobald nicht auf Loopback
+    # gebunden wird — der Prozess kann den Service-/DNS-Namen nicht erraten.
+    allowed_hosts: str = ""
 
 
 settings = Settings()
@@ -2094,18 +2098,89 @@ _apply_tool_allowlist()
 # ---------------------------------------------------------------------------
 
 
-def _run_http() -> None:
-    """Startet den Streamable-HTTP-Transport mit CORS (SDK-004).
+def resolve_http_bind(argv: list[str] | None = None) -> tuple[str, int]:
+    """Ermittelt Host/Port für den HTTP-Transport.
+
+    Eigene Funktion, weil der Bind jetzt zwei Abnehmer hat — uvicorn *und* die
+    App (siehe :func:`build_transport_security`). Vorher wurde er erst *nach*
+    dem App-Bau berechnet, weshalb er dort gar nicht ankommen konnte.
+    """
+    argv = sys.argv if argv is None else argv
+    host = os.environ.get("FEDLEX_HOST", settings.host)
+    port = settings.port
+    for i, arg in enumerate(argv):
+        if arg == "--port" and i + 1 < len(argv):
+            port = int(argv[i + 1])
+    # Cloud-Plattformen (Render etc.) geben den Port via $PORT vor.
+    return host, int(os.environ.get("PORT", port))
+
+
+def build_transport_security(host: str, port: int):
+    """Host/Origin-Allow-List für den Streamable-HTTP-Transport (SEC-005).
+
+    Unter mcp 2.x ein per-App-Kwarg — und ihn wegzulassen ist nicht neutral: das
+    SDK leitet aus dem ``host``-Argument der App einen Default ab und aktiviert
+    bei loopback-artigem Wert automatisch ``127.0.0.1:*``. Da ``host`` selbst auf
+    ``127.0.0.1`` defaultet, traf das jeden Start mit ``FEDLEX_HOST=0.0.0.0``:
+    jede Anfrage unter einem echten Hostnamen bekam HTTP 421. Vor der Migration
+    auf 2.x ging ``host`` an den ``FastMCP``-Konstruktor, wo dieselbe Logik den
+    echten Bind sah und den Schutz korrekt ausliess.
+
+    Rückgabe ``None``, wenn keine Allow-List ableitbar ist — Nicht-Loopback-Bind
+    ohne ``FEDLEX_ALLOWED_HOSTS``. Eine geratene Liste reproduziert genau dieses
+    421, der Aufrufer warnt stattdessen.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    loopback = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+    allowed = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    if allowed:
+        # Loopback bleibt für Container-Health-Checks und Debugging erreichbar.
+        hosts = set(allowed) | loopback
+    elif host in ("127.0.0.1", "localhost", "::1"):
+        hosts = loopback | {f"{host}:{port}"}
+    else:
+        return None
+
+    # Konfigurierte CORS-Origins müssen auch die Transport-Prüfung passieren,
+    # sonst weist der Server genau die Browser-Clients ab, die CORS erlaubt.
+    # ``*`` ist nicht ausdrückbar (Origins werden literal verglichen).
+    origins = {
+        o.strip()
+        for o in settings.allowed_origins.split(",")
+        if o.strip() and o.strip() != "*"
+    }
+    origins |= {f"http://{h}" for h in hosts}
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted(hosts),
+        allowed_origins=sorted(origins),
+    )
+
+
+def build_http_app(host: str = "127.0.0.1", port: int = 8000):
+    """Baut die Streamable-HTTP-App mit CORS (SDK-004).
 
     CORS exponiert den `Mcp-Session-Id`-Header, ohne den Browser-basierte
     MCP-Clients keine Folge-Requests an dieselbe Session schicken können.
+
+    ``host`` muss die Adresse sein, an die uvicorn tatsächlich bindet — siehe
+    :func:`build_transport_security`.
     """
-    import uvicorn
     from starlette.middleware.cors import CORSMiddleware
 
     origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 
-    app = mcp.streamable_http_app()
+    security = build_transport_security(host, port)
+    if security is None:
+        log.warning(
+            "dns_rebinding_protection_off",
+            host=host,
+            hint="Bind ist nicht Loopback und FEDLEX_ALLOWED_HOSTS ist leer — "
+            "setze die Variable auf die Hostnamen, unter denen dieser Server "
+            "erreichbar ist, damit Host und Origin geprüft werden",
+        )
+    app = mcp.streamable_http_app(transport_security=security, host=host)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -2113,16 +2188,17 @@ def _run_http() -> None:
         allow_headers=["Content-Type", "Mcp-Session-Id"],
         expose_headers=["Mcp-Session-Id"],
     )
+    return app
 
-    host = os.environ.get("FEDLEX_HOST", settings.host)
-    port = settings.port
-    for i, arg in enumerate(sys.argv):
-        if arg == "--port" and i + 1 < len(sys.argv):
-            port = int(sys.argv[i + 1])
-    # Cloud-Plattformen (Render etc.) geben den Port via $PORT vor.
-    port = int(os.environ.get("PORT", port))
+
+def _run_http() -> None:
+    """Startet den Streamable-HTTP-Transport."""
+    import uvicorn
+
+    host, port = resolve_http_bind()
+    origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
     log.info("http_start", host=host, port=port, cors_origins=origins)
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(build_http_app(host, port), host=host, port=port)
 
 
 if __name__ == "__main__":
