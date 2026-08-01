@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "fedlex-mcp"
-version     = "1.2.0"
+version     = "2.0.0"
 description = "MCP Server for Swiss federal law via the Fedlex SPARQL endpoint"
 readme      = "README.md"
 license     = { file = "LICENSE" }
@@ -44,7 +44,11 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=7.1.0",
     "respx>=0.21.0",
-    "ruff>=0.15.15",
+    # Obergrenze bewusst gesetzt: ohne sie installiert die CI die jeweils neuste
+    # ruff-Version, und ein geänderter Default-Regelsatz färbt den Lauf rot, ohne
+    # dass sich eine Zeile Code geändert hat. Der Regelsatz unten ist zusätzlich
+    # explizit gepinnt; beides zusammen macht den Lint-Lauf reproduzierbar.
+    "ruff>=0.15.15,<0.17",
 ]
 # Optional OpenTelemetry tracing (OBS-006). Enabled at runtime only when
 # OTEL_EXPORTER_OTLP_ENDPOINT is set; otherwise a complete no-op.
