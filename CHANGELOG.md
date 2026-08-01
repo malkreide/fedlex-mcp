@@ -7,12 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> **Einordnung korrigiert am 01.08.2026.** Die beiden Blöcke unten standen hier
-> als `[1.1.0]` und `[1.2.0]`, obwohl keine der beiden Versionen je ausgeliefert
-> wurde: kein Tag, kein PyPI-Upload, kein GitHub-Release. Zuletzt veröffentlicht
-> ist **1.0.3** (PyPI, Tag `v1.0.3`). Der Inhalt ist unverändert übernommen — nur
-> die Einordnung war falsch. `pyproject.toml` und `server.json` stehen weiterhin
-> auf 1.2.0; das ist der vorbereitete Bump für den nächsten Release.
+## [2.0.0] - 2026-08-01
+
+> **Sammelrelease.** Diese Version liefert alles aus, was seit 1.0.3 auf `main`
+> aufgelaufen ist — 22 Commits, darunter die beiden Stände, die bis zum
+> 01.08.2026 fälschlich als `[1.1.0]` und `[1.2.0]` in diesem CHANGELOG standen,
+> obwohl keiner von beiden je ausgeliefert wurde: kein Tag, kein PyPI-Upload,
+> kein GitHub-Release. Ihr Inhalt ist unverändert übernommen und unten als
+> eigene Blöcke erhalten, damit nachvollziehbar bleibt, was wann entstanden ist.
+>
+> **Warum 2.0.0 und nicht das vorbereitete 1.2.0:** die Migration auf das
+> `mcp`-SDK 2.x hebt die Abhängigkeit von `<2` auf `>=2.0.0,<3`. In einer
+> Umgebung, die `mcp` auf 1.x festhält, bricht die Installation — ein Breaking
+> Change, den auch der Commit selbst so markiert (`feat!`). Der MCP-Tool-Vertrag
+> ist davon nicht betroffen: 12 Tools, 2 Resources, `tool-definitions.lock.json`
+> unverändert. Wer den Server wie dokumentiert über `uvx` startet, merkt vom
+> Major-Sprung nichts.
 
 ### Fixed
 
@@ -91,7 +101,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   obwohl der `mcp-name`-Marker im README seit 1.0.3 auf sie vorbereitet war.
 - **`## Installation` im README** mit dem `uvx`-Client-Snippet für die
   `mcpServers`-Konfiguration (Claude Desktop, Cursor, Windsurf; Hinweis auf den
-  Top-Level-Schlüssel `servers` für VS Code).
+  Top-Level-Schlüssel `servers` für VS Code). Der generierte Block war ans
+  Dateiende gehängt worden — hinter `## Author` und `## Credits`, und als
+  **zweite** `## Installation`-Überschrift. Er steht jetzt an der richtigen
+  Stelle (nach `## Prerequisites`), die Marker `BEGIN/END GENERATED: install`
+  sind erhalten, und der bisherige Abschnitt heisst zur Unterscheidung
+  `## Installation from source`. Damit löst der Anker `#installation` wieder auf
+  den empfohlenen Weg auf und die Schluss-Sektionen stehen wieder am Schluss.
 - **Publish in die MCP Registry** als eigener Workflow-Job (`publish-mcp`),
   nachgelagert zum PyPI-Upload, authentifiziert über GitHub-OIDC
   (`mcp-publisher login github-oidc`). Der Job zieht `version` und

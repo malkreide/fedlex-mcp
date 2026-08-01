@@ -2,7 +2,7 @@
 
 # :balance_scale: fedlex-mcp
 
-![Version](https://img.shields.io/badge/version-1.0.3-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-purple)](https://modelcontextprotocol.io/)
@@ -72,7 +72,28 @@ other national languages.
 
 ---
 
+<!-- BEGIN GENERATED: install -->
 ## Installation
+
+Run via [`uv`](https://docs.astral.sh/uv/)'s `uvx` — no clone or manual install needed. Add to your MCP client config (`mcpServers` for Claude Desktop, Cursor and Windsurf; use a top-level `servers` key for VS Code in `.vscode/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "fedlex-mcp": {
+      "command": "uvx",
+      "args": [
+        "fedlex-mcp"
+      ]
+    }
+  }
+}
+```
+<!-- END GENERATED: install -->
+
+---
+
+## Installation from source
 
 ```bash
 # Clone the repository
@@ -540,22 +561,3 @@ Hayal Oezkan . [malkreide](https://github.com/malkreide)
 - **Portfolio:** [Swiss Public Data MCP Portfolio](https://github.com/malkreide)
 
 <!-- mcp-name: io.github.malkreide/fedlex-mcp -->
-
-<!-- BEGIN GENERATED: install -->
-## Installation
-
-Run via [`uv`](https://docs.astral.sh/uv/)'s `uvx` — no clone or manual install needed. Add to your MCP client config (`mcpServers` for Claude Desktop, Cursor and Windsurf; use a top-level `servers` key for VS Code in `.vscode/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "fedlex-mcp": {
-      "command": "uvx",
-      "args": [
-        "fedlex-mcp"
-      ]
-    }
-  }
-}
-```
-<!-- END GENERATED: install -->

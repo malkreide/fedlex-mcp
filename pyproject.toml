@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "fedlex-mcp"
-version     = "1.2.0"
+version     = "2.0.0"
 description = "MCP Server for Swiss federal law via the Fedlex SPARQL endpoint"
 readme      = "README.md"
 license     = { file = "LICENSE" }
