@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Einordnung korrigiert am 01.08.2026.** Die beiden Blöcke unten standen hier
+> als `[1.1.0]` und `[1.2.0]`, obwohl keine der beiden Versionen je ausgeliefert
+> wurde: kein Tag, kein PyPI-Upload, kein GitHub-Release. Zuletzt veröffentlicht
+> ist **1.0.3** (PyPI, Tag `v1.0.3`). Der Inhalt ist unverändert übernommen — nur
+> die Einordnung war falsch. `pyproject.toml` und `server.json` stehen weiterhin
+> auf 1.2.0; das ist der vorbereitete Bump für den nächsten Release.
+
 ### Fixed
 
 - **Streamable-HTTP wies unter jedem echten Hostnamen mit 421 ab (SEC-005).**
@@ -42,14 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   löst auf 1.29.0 auf und importiert sauber. Die Migration auf die 2.x-API
   (`mcp.server.mcpserver`) bleibt eine eigene, bewusste Aufgabe.
 
-## [1.2.0] - 2026-07-20
+### Aus der nie ausgelieferten 1.2.0 (dokumentiert am 20.07.2026)
 
 Vertieft die Vernehmlassungs-Schicht auf ein fristenzentriertes Produkt: die
 Restfrist wird zur Kernaussage. Keine neuen Tools (bleibt bei 12); die drei
 bestehenden `fedlex_*consultation*`-Tools werden gehärtet. Vollständig
 rückwärtskompatibel für SR/AS/BBl/TERMDAT.
 
-### Added
+#### Added
 - **`days_remaining` in jeder Vernehmlassungs-Antwort**, zur Laufzeit berechnet
   (nie gecacht, nie geschätzt) gegen **Europe/Zurich**. Kalendertag-Semantik:
   `0` = Frist endet heute, negativ = abgelaufen. Zentral in einer testbaren
@@ -76,7 +83,7 @@ rückwärtskompatibel für SR/AS/BBl/TERMDAT.
   findet Bildungsvorlage inkl. ausgewiesener Strategie, Endpoint nicht
   erreichbar → erklärender Fehler statt leerem Resultat.
 
-### Known findings (live verifiziert 2026-07-20)
+#### Known findings (live verifiziert 2026-07-20)
 - **`jolux:Consultation` hat keine Sachgebiets-/Klassifikations-Taxonomie** —
   thematische Filterung ist ausschliesslich Freitext. Der Ankerbegriff
   «Volksschule» kommt in 0 Titeln vor (`bildung` 44, `topic="education"`-Union
@@ -88,7 +95,7 @@ rückwärtskompatibel für SR/AS/BBl/TERMDAT.
 - Scope-Grenze dokumentiert: **nur Bund, keine kantonalen Vernehmlassungen**;
   kein Push-Mechanismus (MCP ist Pull-basiert).
 
-### Refactor
+#### Refactor
 - **Geteilter SPARQL-/JSON-Client extrahiert** (`sparql_client.py`, vendored
   Portfolio-Baustein). Der bisherige `_execute_sparql`-Retry-Kern ist jetzt eine
   dünne Bindung an das wiederverwendbare Modul; `sparql_escape` / `val` daraus
@@ -98,7 +105,7 @@ rückwärtskompatibel für SR/AS/BBl/TERMDAT.
   Kopie in `swiss-environment-mcp` — bis ein installierbares `swiss-mcp-commons`
   (PyPI/OIDC) existiert, sind die Kopien synchron zu halten.
 
-## [1.1.0] - 2026-07-18
+### Aus der nie ausgelieferten 1.1.0 (dokumentiert am 18.07.2026)
 
 Erweitert den Server um zwei zusätzliche, ebenfalls SPARQL-basierte Datenquellen
 — Vernehmlassungen (Fedlex) und die Terminologiedatenbank TERMDAT (via LINDAS).
@@ -110,7 +117,7 @@ die bestehenden `fedlex_*`-Tools und beide Resources bleiben unangetastet.
 > semver-konformer Minor-Bump für eine rückwärtskompatible Funktionserweiterung
 > ist es `1.1.0`.
 
-### Added
+#### Added
 - **Vernehmlassungen (Fedlex, `jolux:Consultation`)** — drei neue Tools:
   - `fedlex_get_open_consultations` — Fristen-Monitoring; filtert **primär über
     `eventEndDate >= heute`**, nicht über den Status (die beiden Signale sind
@@ -141,14 +148,14 @@ die bestehenden `fedlex_*`-Tools und beide Resources bleiben unangetastet.
   Consultation ohne `hasSubTask`, SPARQL-Escaping. Live-Tests gegen beide
   Endpoints unter `-m live` (aus CI ausgeschlossen).
 
-### Changed
+#### Changed
 - `fedlex://info`-Resource: Version, zweiter Endpoint, alle 12 Tools und die
   Isolationsnotiz ergänzt (Resource-URI unverändert).
 - `handle_error` und der Response-Envelope tragen jetzt den betroffenen Dienst
   (`Fedlex` vs. `TERMDAT (LINDAS)`), damit ein isolierter LINDAS-Fehler nicht als
   Fedlex-Fehler gelesen wird.
 
-### Known findings
+#### Known findings
 Live verifiziert am 18.07.2026:
 
 **Vernehmlassungen (Fedlex)**
@@ -175,6 +182,27 @@ Live verifiziert am 18.07.2026:
   Beide Eingaben werden akzeptiert und intern auf die Konzept-ID normalisiert.
 - **`rm` (Rätoromanisch)** ist im LINDAS-Teilbestand faktisch nicht besetzt
   (0 Namen) — als Zielsprache erlaubt, liefert aber in aller Regel keinen Treffer.
+
+## [1.0.3] - 2026-06-07
+
+### Fixed
+
+- `mcp-name` im README deklariert, damit die MCP Registry die PyPI-Ownership
+  auflösen kann. Der Marker muss in der Datei stehen, die `pyproject.toml` als
+  `readme` deklariert — in `pyproject.toml` allein genügt er nicht.
+  (`ce11fef`)
+
+## [1.0.2] - 2026-06-07
+
+### Added
+
+- `mcp-name` in `pyproject.toml` für die Ownership-Prüfung der MCP Registry.
+  (`d213966`)
+
+### Changed
+
+- Zweisprachige Dokumentation vereinheitlicht: Englisch als Hauptfassung,
+  Deutsch verlinkt. (`49ff7f5`, PR #17)
 
 ## [1.0.0] - 2026-06-03
 
