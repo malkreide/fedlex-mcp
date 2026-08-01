@@ -39,6 +39,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ruff check src/ tests/` clean.
 
 
+### Geändert — Breaking
+
+- **Migration auf das `mcp`-Python-SDK 2.x.** Der Server importiert nicht mehr
+  `mcp.server.fastmcp`, sondern `mcp.server.mcpserver`; aus `FastMCP` wird
+  `MCPServer`. Die Abhängigkeit lautet damit `mcp[cli]>=2.0.0,<3` statt
+  `>=1.28.1,<2` — das ist der Breaking-Anteil: wer `fedlex-mcp` in eine Umgebung
+  installiert, die `mcp` auf 1.x festhält, bekommt jetzt einen
+  Auflösungskonflikt. Unter `uvx`, dem dokumentierten Installationsweg, ist die
+  Umgebung isoliert und die Änderung unsichtbar.
+
+  **Der Tool-Vertrag bleibt bewusst unverändert.** `mcp_types` 2.x hat die
+  Python-Felder auf snake_case umbenannt (`inputSchema` → `input_schema`,
+  `outputSchema` → `output_schema`); `compute_tool_signature_hash()` liest jetzt
+  die neuen Namen und dumpt die Annotations mit `by_alias=True`, damit die
+  Draht-Schreibweise (`readOnlyHint`, …) erhalten bleibt. Ohne dieses `by_alias`
+  hätte sich der Signatur-Hash geändert, ohne dass sich am Vertrag etwas ändert —
+  die Drift-Erkennung aus SEC-022 hätte falsch angeschlagen.
+  `tool-definitions.lock.json` ist entsprechend unverändert geblieben; die 12
+  Tools und 2 Resources sind identisch.
+
+  Protokollseitig bringt 2.x eine neuere Revision mit
+  (`LATEST_PROTOCOL_VERSION` = `2026-07-28`). Sie wird beim `initialize`-Handshake
+  ausgehandelt, ältere Clients bleiben also bedient.
+
 ### Behoben
 
 - **`mcp` auf `<2` begrenzt.** `mcp` 2.0.0, veröffentlicht am 28.07.2026, hat
@@ -48,6 +72,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jedem `pip install`. In beide Richtungen verifiziert: 2.0.0 scheitert, `<2`
   löst auf 1.29.0 auf und importiert sauber. Die Migration auf die 2.x-API
   (`mcp.server.mcpserver`) bleibt eine eigene, bewusste Aufgabe.
+
+  > **Zwischenstand, inzwischen überholt.** Die Migration ist im selben
+  > Release-Zyklus erfolgt (siehe «Geändert — Breaking»). Ausgeliefert wird
+  > `mcp[cli]>=2.0.0,<3`, **nicht** `<2`. Der Eintrag bleibt stehen, weil er
+  > erklärt, warum diese Abhängigkeit überhaupt eine Obergrenze trägt.
+
+- **`mcp`-Untergrenze auf `>=1.28.1` angehoben (CVE-2026-59950).** Vorher stand
+  dort ein offenes `>=1.3.0`, unter dem eine frische Auflösung eine verwundbare
+  SDK-Version hätte wählen können. Die heute ausgelieferte Untergrenze
+  (`>=2.0.0`) schliesst den betroffenen Bereich weiterhin aus.
+
+### Hinzugefügt — Verteilung und Installation
+
+- **`server.json`** ergänzt: Registry-Metadaten für die MCP Registry
+  (`io.github.malkreide/fedlex-mcp`, `registryType: pypi`, `runtimeHint: uvx`,
+  Kategorie «Legal, Courts & Regulatory»). Bis dahin existierte die Datei nicht,
+  obwohl der `mcp-name`-Marker im README seit 1.0.3 auf sie vorbereitet war.
+- **`## Installation` im README** mit dem `uvx`-Client-Snippet für die
+  `mcpServers`-Konfiguration (Claude Desktop, Cursor, Windsurf; Hinweis auf den
+  Top-Level-Schlüssel `servers` für VS Code).
+- **Publish in die MCP Registry** als eigener Workflow-Job (`publish-mcp`),
+  nachgelagert zum PyPI-Upload, authentifiziert über GitHub-OIDC
+  (`mcp-publisher login github-oidc`). Der Job zieht `version` und
+  `packages[0].version` in `server.json` aus dem Release-Tag nach, damit
+  Tag, Paket und Registry-Eintrag nicht auseinanderlaufen können.
+
+### Geändert — Dokumentation und Interna
+
+- README (beide Sprachfassungen): Schluss-Sektionen in der Reihenfolge
+  Contributing → Security statt Security → Contributing.
+- README (EN): Die Sektion «MCP Protocol Version» nannte die SDK-Grenze
+  `>=1.3.0` und war damit über drei Abhängigkeitsänderungen hinweg falsch; sie
+  verweist jetzt auf `pyproject.toml` statt eine Version zu wiederholen.
+- `ruff` in `pyproject.toml` mit Obergrenze gepinnt (`>=0.15.15,<0.17`). Ohne
+  Obergrenze installiert die CI die jeweils neuste Version; ein geänderter
+  Default-Regelsatz färbt den Lauf dann rot, ohne dass sich eine Zeile Code
+  geändert hat.
+- `actions/checkout` in `ci.yml`, `publish.yml` und `security.yml` von v6 auf v7
+  angehoben (Dependabot).
 
 ### Aus der nie ausgelieferten 1.2.0 (dokumentiert am 20.07.2026)
 

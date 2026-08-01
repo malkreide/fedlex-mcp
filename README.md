@@ -465,8 +465,9 @@ write-capable tool is added.
 ## MCP Protocol Version
 
 The protocol version is negotiated at the `initialize` handshake by the
-[`mcp`](https://pypi.org/project/mcp/) Python SDK (pinned to `>=1.3.0` in
-`pyproject.toml`). The SDK is kept current via monthly Dependabot PRs
+[`mcp`](https://pypi.org/project/mcp/) Python SDK; the supported range is
+declared in `pyproject.toml` (repeating it here only lets it go stale). The SDK
+is kept current via monthly Dependabot PRs
 (`.github/dependabot.yml`); protocol-relevant bumps are noted in
 [`CHANGELOG.md`](CHANGELOG.md).
 
