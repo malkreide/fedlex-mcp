@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Retry-Politik gegenueber den SPARQL-Endpoints** (ARCH-014), im gemeinsamen
+  Retry-Kern und damit fuer SPARQL- und JSON-Requests zugleich.
+
+  `Retry-After` bei 429 und 503 in beiden Formen (Sekundenzahl und HTTP-Datum,
+  RFC 9110 §10.2.3) schlaegt die eigene Backoff-Kurve. Ein unbrauchbarer Header
+  fuehrt zurueck auf die Kurve statt zum Absturz.
+
+  Jitter: `base_delay * 2**attempt` war deterministisch, alle Clients retryen im
+  Gleichtakt und die Last kommt als Welle zurueck, genau wenn der Endpoint sich
+  erholt. Neu [0.5x, 1.5x]; auf einem `Retry-After` einseitig [1.0x, 1.25x].
+  Deckel von 20 s auf jede Einzelwartezeit.
+
+  Gesamtbudget von 45 s ueber den ganzen Aufruf. Der Wert liegt **bewusst ueber**
+  dem MCP-Client-Default (`MCP_DEFAULT_TIMEOUT = 30.0`), aus demselben Grund, aus
+  dem `REQUEST_TIMEOUT` und `LINDAS_TIMEOUT` bei 45 s stehen: Beides sind
+  SPARQL-Endpoints, und ein Budget unter 30 s wuerde legitime Queries abwuergen.
+  Ein Test haelt die Abweichung fest.
+
+
 ## [2.0.1] - 2026-08-02
 
 ### Behoben
