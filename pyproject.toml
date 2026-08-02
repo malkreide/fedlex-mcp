@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "fedlex-mcp"
-version     = "2.0.0"
+version     = "2.0.1"
 description = "MCP Server for Swiss federal law via the Fedlex SPARQL endpoint"
 readme      = "README.md"
 license     = { file = "LICENSE" }
@@ -35,7 +35,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.0.0",
-    "structlog>=25.5.0",
+    "structlog>=25.5.0,<27",
 ]
 
 [project.optional-dependencies]
