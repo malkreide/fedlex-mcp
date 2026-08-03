@@ -29,5 +29,11 @@ jobs:
         run: |
           PYTHONPATH=src pytest tests/ -m "not live"
 
+      - name: Install pinned ruff
+        run: pip install ruff==0.16.1
+
       - name: Lint
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/
+
+      - name: Format check
+        run: ruff format --check src/ tests/ scripts/
