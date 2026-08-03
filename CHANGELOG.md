@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Behoben
+
+- **Der 20-Sekunden-Deckel war keine Grenze.** Gedeckelt wurde *vor* dem
+  Jittern, also wurde ein auf `MAX_DELAY_S` gedeckelter Wert anschliessend mit
+  bis zu 1.5 multipliziert: exponentielle Wartezeiten bis 30 s,
+  `Retry-After`-Wartezeiten bis 25 s. Die Konstante behauptete eine Schranke,
+  die sie nicht einhielt. Neu wird nach dem Jittern gedeckelt.
+
+- **Das Gesamtbudget war nicht garantiert.** `httpx` wendet sein Timeout pro
+  Operation an (connect/read/write/pool), und das Read-Timeout beginnt mit jedem
+  Chunk von vorn — eine langsam troepfelnde Antwort konnte das Budget
+  ueberdauern, ohne dass ein einzelner Read ablief. Neu liegt eine
+  `asyncio.timeout`-Deadline um den Request; das httpx-Timeout bleibt als
+  feinere Grenze pro Operation daneben. Weil `_request_with_retry` der
+  gemeinsame Kern ist, gilt beides fuer SPARQL- und JSON-Requests zugleich.
+
+  Beide Befunde stammen aus einem Codex-Review an `parlament-mcp#35`, wo
+  dasselbe Muster nach der Uebernahme geprueft wurde. Der Test dazu laeuft
+  bewusst **ohne** die Fake-Uhr der uebrigen Budget-Tests: Die Zusicherung
+  haengt an echter Zeit, und eine Uhr, die nur beim Schlafen vorrueckt, kann sie
+  nicht widerlegen — genau dieser blinde Fleck liess den Fehler durch.
+
 ### Added
 
 - **Retry-Politik gegenueber den SPARQL-Endpoints** (ARCH-014), im gemeinsamen

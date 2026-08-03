@@ -25,8 +25,16 @@ def _resp(status: int, retry_after: str | None = None) -> httpx.Response:
 
 async def _call(http, **kw):
     return await c._request_with_retry(
-        http, "GET", URL, params=None, headers=None,
-        base_delay=2.0, max_attempts=3, egress_check=None, on_retry=None, **kw
+        http,
+        "GET",
+        URL,
+        params=None,
+        headers=None,
+        base_delay=2.0,
+        max_attempts=3,
+        egress_check=None,
+        on_retry=None,
+        **kw,
     )
 
 
@@ -71,20 +79,34 @@ class TestRetryDelay:
             assert c.retry_delay(0, exc, 2.0) >= 5.0
 
     def test_absurd_retry_after_is_capped(self):
+        # Exactly the cap: capping happens after jitter, otherwise MAX_DELAY_S
+        # would not be a bound at all. Equality still discriminates — the bare
+        # curve gives 2s here.
         exc = httpx.HTTPStatusError("503", request=None, response=_resp(503, "86400"))
-        delay = c.retry_delay(0, exc, 2.0)
-        assert c.MAX_DELAY_S <= delay <= c.MAX_DELAY_S * (1 + c.RETRY_AFTER_JITTER)
+        assert c.retry_delay(0, exc, 2.0) == c.MAX_DELAY_S
 
     def test_exponential_ladder_is_capped(self):
-        assert c.retry_delay(10, None, 2.0) <= c.MAX_DELAY_S * (1 + c.JITTER_SPREAD)
+        for _ in range(30):
+            assert c.retry_delay(10, None, 2.0) <= c.MAX_DELAY_S
+
+    def test_the_cap_is_a_real_bound_not_a_midpoint(self):
+        """MAX_DELAY_S must hold even when jitter swings up.
+
+        Capping before jitter let a 20s ceiling grow to 30s on the exponential
+        path and 25s on the ``Retry-After`` path. Found by a Codex review on
+        ``parlament-mcp#35``, on the same pattern.
+        """
+        exc = httpx.HTTPStatusError("429", request=None, response=_resp(429, "86400"))
+        for attempt in range(0, 8):
+            for _ in range(20):
+                assert c.retry_delay(attempt, None, 2.0) <= c.MAX_DELAY_S
+                assert c.retry_delay(attempt, exc, 2.0) <= c.MAX_DELAY_S
 
     def test_delay_is_spread(self):
         draws = {c.retry_delay(1, None, 2.0) for _ in range(30)}
         assert len(draws) > 1, "Wartezeit ist deterministisch — Jitter fehlt"
         base = 4.0
-        assert all(
-            base * (1 - c.JITTER_SPREAD) <= d <= base * (1 + c.JITTER_SPREAD) for d in draws
-        )
+        assert all(base * (1 - c.JITTER_SPREAD) <= d <= base * (1 + c.JITTER_SPREAD) for d in draws)
 
 
 @pytest.fixture
@@ -168,3 +190,30 @@ def test_budget_deliberately_exceeds_the_mcp_client_default():
 
     assert c.TOTAL_BUDGET_S > MCP_DEFAULT_TIMEOUT
     assert c.TOTAL_BUDGET_S == REQUEST_TIMEOUT == LINDAS_TIMEOUT
+
+
+@respx.mock
+async def test_a_slow_response_is_cut_by_the_wall_clock_deadline():
+    """The budget must bind even when the httpx timeout never fires.
+
+    httpx applies its timeout per operation and the read timeout restarts with
+    every chunk, so a slowly trickling answer can outlast the total budget
+    without any single read timing out.
+
+    Deliberately without ``fake_clock``: a guarantee about real time cannot be
+    refuted by a clock that only moves when something sleeps.
+    """
+    import asyncio as real_asyncio
+    import time as real_time
+
+    async def _slow(request):
+        await real_asyncio.sleep(1.0)
+        return httpx.Response(200, json={})
+
+    respx.get(URL).mock(side_effect=_slow)
+    started = real_time.monotonic()
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(TimeoutError):
+            await _call(http, total_budget=0.05)
+    elapsed = real_time.monotonic() - started
+    assert elapsed < 0.5, f"deadline did not cut: {elapsed:.2f}s"

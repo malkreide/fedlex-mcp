@@ -106,10 +106,14 @@ def retry_delay(attempt: int, last_error: Exception | None, base_delay: float) -
     """
     hinted = parse_retry_after(getattr(last_error, "response", None))
     if hinted is not None:
-        capped = min(hinted, MAX_DELAY_S)
-        return capped * (1.0 + random.random() * RETRY_AFTER_JITTER)
-    capped = min(base_delay * (2**attempt), MAX_DELAY_S)
-    return capped * (1.0 - JITTER_SPREAD + random.random() * 2 * JITTER_SPREAD)
+        jittered = hinted * (1.0 + random.random() * RETRY_AFTER_JITTER)
+    else:
+        jittered = (base_delay * (2**attempt)) * (
+            1.0 - JITTER_SPREAD + random.random() * 2 * JITTER_SPREAD
+        )
+    # Cap *after* jitter. The other order made MAX_DELAY_S not a bound at all:
+    # a value capped at 20s was then multiplied by up to 1.5 and landed at 30s.
+    return min(jittered, MAX_DELAY_S)
 
 
 def sparql_escape(value: str) -> str:
@@ -158,13 +162,22 @@ async def _request_with_retry(
         if remaining <= 0:
             break
         try:
-            # Das Budget schlaegt das Per-Request-Timeout, sobald es enger ist —
-            # sonst ueberdauert eine einzelne langsame Query die Zuteilung.
-            response = await client.request(
-                method, url, params=params, headers=headers, timeout=remaining
-            )
-            response.raise_for_status()
-            return response
+            # httpx wendet sein Timeout pro Operation an (connect/read/write/
+            # pool), und das Read-Timeout beginnt mit jedem Chunk von vorn — das
+            # begrenzt jeden Schritt, nicht den Aufruf. Eine langsam
+            # troepfelnde Antwort koennte das Budget also ueberdauern.
+            # `asyncio.timeout` ist die Wanduhr-Deadline, die das Budget
+            # tatsaechlich verspricht; das httpx-Timeout bleibt als feinere
+            # Grenze pro Operation daneben.
+            async with asyncio.timeout(remaining):
+                response = await client.request(
+                    method, url, params=params, headers=headers, timeout=remaining
+                )
+                response.raise_for_status()
+                return response
+        except TimeoutError as e:  # Budget aufgebraucht, nicht bloss dieser Versuch
+            last_exc = e
+            break
         except httpx.HTTPStatusError as e:
             if e.response.status_code not in RETRYABLE_STATUS:
                 raise
