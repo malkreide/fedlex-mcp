@@ -83,7 +83,9 @@ TERMDAT_COMMUNICATED_ENTRIES = 400_000
 
 SOURCE_NAME = "Fedlex, Schweizerische Bundeskanzlei (fedlex.admin.ch)"
 SOURCE_LICENSE = "Freie Wiederverwendung gemäss fedlex.admin.ch/de/broadcasters"
-TERMDAT_SOURCE_NAME = "TERMDAT, Schweizerische Bundeskanzlei — via LINDAS (lindas.admin.ch/fch/termdat)"
+TERMDAT_SOURCE_NAME = (
+    "TERMDAT, Schweizerische Bundeskanzlei — via LINDAS (lindas.admin.ch/fch/termdat)"
+)
 TERMDAT_LICENSE = "Open reuse licence (opendata.swiss / LINDAS)"
 
 # Attribution-Strings. Der TERMDAT-Hinweis auf den publizierten Teilbestand
@@ -198,10 +200,12 @@ def _init_tracing() -> None:
         return
 
     provider = TracerProvider(
-        resource=Resource.create({
-            "service.name": "fedlex-mcp",
-            "deployment.environment": os.environ.get("FEDLEX_ENV", "production"),
-        })
+        resource=Resource.create(
+            {
+                "service.name": "fedlex-mcp",
+                "deployment.environment": os.environ.get("FEDLEX_ENV", "production"),
+            }
+        )
     )
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)
@@ -344,27 +348,55 @@ async def _trace(ctx: Context | None, tool: str, **fields: object) -> None:
             pass
 
 
-def _ok(tool: str, results: list[dict], markdown: str,
-        match_type: Literal["exact", "none"] = "exact",
-        source: str = SOURCE_NAME, license: str = SOURCE_LICENSE,
-        message: str | None = None) -> FedlexResponse:
+def _ok(
+    tool: str,
+    results: list[dict],
+    markdown: str,
+    match_type: Literal["exact", "none"] = "exact",
+    source: str = SOURCE_NAME,
+    license: str = SOURCE_LICENSE,
+    message: str | None = None,
+) -> FedlexResponse:
     return FedlexResponse(
-        source=source, license=license, tool=tool, match_type=match_type,
-        count=len(results), results=results, markdown=markdown, message=message,
+        source=source,
+        license=license,
+        tool=tool,
+        match_type=match_type,
+        count=len(results),
+        results=results,
+        markdown=markdown,
+        message=message,
     )
 
 
-def _empty(tool: str, markdown: str, source: str = SOURCE_NAME,
-           license: str = SOURCE_LICENSE, message: str | None = None) -> FedlexResponse:
+def _empty(
+    tool: str,
+    markdown: str,
+    source: str = SOURCE_NAME,
+    license: str = SOURCE_LICENSE,
+    message: str | None = None,
+) -> FedlexResponse:
     return FedlexResponse(
-        source=source, license=license, tool=tool, match_type="none",
-        count=0, results=[], markdown=markdown, message=message,
+        source=source,
+        license=license,
+        tool=tool,
+        match_type="none",
+        count=0,
+        results=[],
+        markdown=markdown,
+        message=message,
     )
 
 
-async def _fail(ctx: Context | None, tool: str, e: Exception, *,
-                service: str = "Fedlex", source: str = SOURCE_NAME,
-                license: str = SOURCE_LICENSE) -> FedlexResponse:
+async def _fail(
+    ctx: Context | None,
+    tool: str,
+    e: Exception,
+    *,
+    service: str = "Fedlex",
+    source: str = SOURCE_NAME,
+    license: str = SOURCE_LICENSE,
+) -> FedlexResponse:
     """Einheitlicher Fehler-Pfad: maskierte Meldung + ctx.error (SDK-003 / OBS-002)."""
     msg = handle_error(tool, e, service=service)
     if ctx is not None:
@@ -373,8 +405,14 @@ async def _fail(ctx: Context | None, tool: str, e: Exception, *,
         except Exception:  # pragma: no cover - Context ohne aktive Session
             pass
     return FedlexResponse(
-        source=source, license=license, tool=tool, match_type="error",
-        count=0, results=[], markdown=msg, message=msg,
+        source=source,
+        license=license,
+        tool=tool,
+        match_type="error",
+        count=0,
+        results=[],
+        markdown=msg,
+        message=msg,
     )
 
 
@@ -467,8 +505,9 @@ def handle_error(tool: str, e: Exception, service: str = "Fedlex") -> str:
     Fedlex-Fehler schliesst. Interne Exception-Details werden ausschliesslich
     serverseitig geloggt und nie an das LLM zurückgegeben (OBS-001 / OBS-002).
     """
-    log.warning("tool_error", tool=tool, service=service,
-                error_type=type(e).__name__, detail=str(e))
+    log.warning(
+        "tool_error", tool=tool, service=service, error_type=type(e).__name__, detail=str(e)
+    )
     if isinstance(e, httpx.HTTPStatusError):
         code = e.response.status_code
         if code == 400:
@@ -525,12 +564,18 @@ class SearchLawsInput(BaseModel):
     keywords: str = Field(
         ...,
         description="Suchbegriff(e) im Erlasstittel, z.B. 'Volksschule', 'Datenschutz', 'Berufsbildung'",
-        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+        min_length=2,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     language: Language = Field(default=Language.DE, description="Sprache: 'de', 'fr', 'it', 'rm'")
     in_force_only: bool = Field(default=True, description="Nur gültige Erlasse (Standard: True)")
-    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
-                       description=f"Maximale Trefferzahl (1–{MAX_RESULTS_LIMIT})")
+    limit: int = Field(
+        default=MAX_RESULTS_DEFAULT,
+        ge=1,
+        le=MAX_RESULTS_LIMIT,
+        description=f"Maximale Trefferzahl (1–{MAX_RESULTS_LIMIT})",
+    )
 
 
 class GetLawBySrInput(BaseModel):
@@ -538,7 +583,9 @@ class GetLawBySrInput(BaseModel):
     sr_number: str = Field(
         ...,
         description="SR-Nummer, z.B. '101' (BV), '235.1' (DSG), '412.10' (BBG), '170.32' (VG)",
-        min_length=1, max_length=20, pattern=SR_NUMBER_PATTERN,
+        min_length=1,
+        max_length=20,
+        pattern=SR_NUMBER_PATTERN,
     )
     language: Language = Field(default=Language.DE)
 
@@ -552,7 +599,9 @@ class GetRecentPublicationsInput(BaseModel):
 
 class GetUpcomingChangesInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    days_ahead: int = Field(default=90, ge=1, le=365, description="Vorausschau in Tagen (Standard: 90)")
+    days_ahead: int = Field(
+        default=90, ge=1, le=365, description="Vorausschau in Tagen (Standard: 90)"
+    )
     language: Language = Field(default=Language.DE)
     limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT)
 
@@ -562,11 +611,17 @@ class SearchGazetteInput(BaseModel):
     keywords: str = Field(
         ...,
         description="Suchbegriff im BBl-Titel, z.B. 'Berufsbildung', 'Datenschutz', 'Volksinitiative'",
-        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+        min_length=2,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     language: Language = Field(default=Language.DE)
-    year: int | None = Field(default=None, ge=1999, le=2030,
-                              description="Optional: Nur dieses Publikationsjahr (z.B. 2024)")
+    year: int | None = Field(
+        default=None,
+        ge=1999,
+        le=2030,
+        description="Optional: Nur dieses Publikationsjahr (z.B. 2024)",
+    )
     limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT)
 
 
@@ -575,7 +630,9 @@ class GetLawHistoryInput(BaseModel):
     sr_number: str = Field(
         ...,
         description="SR-Nummer, z.B. '235.1' (DSG), '412.10' (BBG), '101' (BV)",
-        min_length=1, max_length=20, pattern=SR_NUMBER_PATTERN,
+        min_length=1,
+        max_length=20,
+        pattern=SR_NUMBER_PATTERN,
     )
     language: Language = Field(default=Language.DE)
 
@@ -585,7 +642,8 @@ class SearchTreatiesInput(BaseModel):
     keywords: str | None = Field(
         default=None,
         description="Suchbegriff im Titel, z.B. 'Bildung', 'EU', 'Datenschutz'. Ohne Begriff: neueste Verträge.",
-        max_length=200, pattern=KEYWORD_PATTERN,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     language: Language = Field(default=Language.DE)
     limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT)
@@ -625,8 +683,7 @@ async def fedlex_search_laws(params: SearchLawsInput, ctx: Context | None = None
     await _trace(ctx, tool, lang=lang, in_force_only=params.in_force_only)
 
     in_force_filter = (
-        f'\n  ?ca jolux:inForceStatus <{STATUS_IN_FORCE}> .'
-        if params.in_force_only else ""
+        f"\n  ?ca jolux:inForceStatus <{STATUS_IN_FORCE}> ." if params.in_force_only else ""
     )
 
     query = f"""
@@ -672,10 +729,16 @@ LIMIT {params.limit}
                 status_uri = val(b, "inForceStatus")
                 st = status_label(status_uri) if status_uri else "–"
                 url = fedlex_url(uri, lang)
-                results.append({
-                    "sr_number": sr_num, "title": title, "title_short": short or None,
-                    "status": st, "uri": uri, "url": url,
-                })
+                results.append(
+                    {
+                        "sr_number": sr_num,
+                        "title": title,
+                        "title_short": short or None,
+                        "status": st,
+                        "uri": uri,
+                        "url": url,
+                    }
+                )
                 short_display = f" ({short})" if short else ""
                 md += f"### SR {sr_num}: {title}{short_display}\n"
                 md += f"- **Status:** {st}\n"
@@ -689,7 +752,10 @@ LIMIT {params.limit}
 
 
 def _law_detail_markdown(
-    b: dict, sr: str, lang: str, successor: dict | None = None,
+    b: dict,
+    sr: str,
+    lang: str,
+    successor: dict | None = None,
 ) -> str:
     """Formatiert die Detailansicht eines Erlasses als Markdown."""
     uri = val(b, "ca")
@@ -765,7 +831,9 @@ def _law_record(b: dict, lang: str) -> dict:
         "openWorldHint": True,
     },
 )
-async def fedlex_get_law_by_sr(params: GetLawBySrInput, ctx: Context | None = None) -> FedlexResponse:
+async def fedlex_get_law_by_sr(
+    params: GetLawBySrInput, ctx: Context | None = None
+) -> FedlexResponse:
     """Ruft einen Bundeserlass anhand seiner SR-Nummer ab (Detailansicht)."""
     tool = "fedlex_get_law_by_sr"
     lang = params.language.value
@@ -900,13 +968,17 @@ LIMIT {params.limit}
                 return _empty(tool, md)
 
             results: list[dict] = []
-            md = result_header(len(bindings), f"AS-Publikationen seit {since_date} [{lang.upper()}]")
+            md = result_header(
+                len(bindings), f"AS-Publikationen seit {since_date} [{lang.upper()}]"
+            )
             for b in bindings:
                 uri = val(b, "act")
                 title = val(b, "title", "(kein Titel)")
                 pub_date = val(b, "pubDate", "–")
                 url = fedlex_url(uri, lang)
-                results.append({"title": title, "publication_date": pub_date, "uri": uri, "url": url})
+                results.append(
+                    {"title": title, "publication_date": pub_date, "uri": uri, "url": url}
+                )
                 md += f"### {pub_date}\n**{title}**\n[{url}]({url})\n\n"
 
             md += FEDLEX_SOURCE
@@ -986,11 +1058,16 @@ LIMIT {params.limit}
                 sr_num = val(b, "srNumber", "–")
                 entry = val(b, "entryDate", "–")
                 url = fedlex_url(uri, lang)
-                results.append({
-                    "sr_number": sr_num if sr_num != "–" else None,
-                    "title": title, "title_short": short or None,
-                    "entry_date": entry, "uri": uri, "url": url,
-                })
+                results.append(
+                    {
+                        "sr_number": sr_num if sr_num != "–" else None,
+                        "title": title,
+                        "title_short": short or None,
+                        "entry_date": entry,
+                        "uri": uri,
+                        "url": url,
+                    }
+                )
                 short_display = f" ({short})" if short else ""
                 sr_display = f"SR {sr_num}" if sr_num != "–" else "SR –"
                 md += f"### 📅 {entry} — {sr_display}: {title}{short_display}\n"
@@ -1021,7 +1098,9 @@ LIMIT {params.limit}
         "openWorldHint": True,
     },
 )
-async def fedlex_search_gazette(params: SearchGazetteInput, ctx: Context | None = None) -> FedlexResponse:
+async def fedlex_search_gazette(
+    params: SearchGazetteInput, ctx: Context | None = None
+) -> FedlexResponse:
     """Durchsucht das Bundesblatt (BBl) nach amtlichen Publikationen."""
     tool = "fedlex_search_gazette"
     lang = params.language.value
@@ -1029,10 +1108,7 @@ async def fedlex_search_gazette(params: SearchGazetteInput, ctx: Context | None 
     kw = params.keywords.lower()
     await _trace(ctx, tool, lang=lang, year=params.year)
 
-    year_filter = (
-        f'FILTER(STRSTARTS(STR(?pubDate), "{params.year}"))'
-        if params.year else ""
-    )
+    year_filter = f'FILTER(STRSTARTS(STR(?pubDate), "{params.year}"))' if params.year else ""
 
     query = f"""
 PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
@@ -1073,7 +1149,9 @@ LIMIT {params.limit}
                 title = val(b, "title", "(kein Titel)")
                 pub_date = val(b, "pubDate", "–")
                 url = fedlex_url(uri, lang)
-                results.append({"title": title, "publication_date": pub_date, "uri": uri, "url": url})
+                results.append(
+                    {"title": title, "publication_date": pub_date, "uri": uri, "url": url}
+                )
                 md += f"### {pub_date}\n**{title}**\n[{url}]({url})\n\n"
 
             md += FEDLEX_SOURCE
@@ -1101,7 +1179,9 @@ LIMIT {params.limit}
         "openWorldHint": True,
     },
 )
-async def fedlex_get_law_history(params: GetLawHistoryInput, ctx: Context | None = None) -> FedlexResponse:
+async def fedlex_get_law_history(
+    params: GetLawHistoryInput, ctx: Context | None = None
+) -> FedlexResponse:
     """Ruft die Versionsgeschichte (alle konsolidierten Fassungen) eines Erlasses ab."""
     tool = "fedlex_get_law_history"
     lang = params.language.value
@@ -1150,10 +1230,15 @@ LIMIT 50
                 url = fedlex_url(uri, lang)
                 st = status_label(status_uri) if status_uri else "–"
                 version = total - i
-                results.append({
-                    "version": version, "entry_date": entry, "status": st,
-                    "uri": uri, "url": url,
-                })
+                results.append(
+                    {
+                        "version": version,
+                        "entry_date": entry,
+                        "status": st,
+                        "uri": uri,
+                        "url": url,
+                    }
+                )
                 md += f"| v{version} | {entry} | {st} | [→]({url}) |\n"
 
             md += FEDLEX_SOURCE
@@ -1181,7 +1266,9 @@ LIMIT 50
         "openWorldHint": True,
     },
 )
-async def fedlex_search_treaties(params: SearchTreatiesInput, ctx: Context | None = None) -> FedlexResponse:
+async def fedlex_search_treaties(
+    params: SearchTreatiesInput, ctx: Context | None = None
+) -> FedlexResponse:
     """Sucht internationale Staatsverträge der Schweiz (SR-Nummern beginnen mit '0.')."""
     tool = "fedlex_search_treaties"
     lang = params.language.value
@@ -1190,7 +1277,8 @@ async def fedlex_search_treaties(params: SearchTreatiesInput, ctx: Context | Non
 
     kw_filter = (
         f'FILTER(CONTAINS(LCASE(STR(?title)), "{sparql_escape(params.keywords.lower())}"))'
-        if params.keywords else ""
+        if params.keywords
+        else ""
     )
 
     query = f"""
@@ -1214,9 +1302,8 @@ LIMIT {params.limit}
 
             kw_txt = f"'{params.keywords}'" if params.keywords else "alle"
             if not bindings:
-                md = (
-                    f"Keine Staatsverträge für {kw_txt} [{lang.upper()}]."
-                    + no_match_hint("**Tipp:** Suchbegriff anpassen oder weglassen.")
+                md = f"Keine Staatsverträge für {kw_txt} [{lang.upper()}]." + no_match_hint(
+                    "**Tipp:** Suchbegriff anpassen oder weglassen."
                 )
                 return _empty(tool, md)
 
@@ -1228,10 +1315,15 @@ LIMIT {params.limit}
                 sr_num = val(b, "srNumber", "–")
                 entry = val(b, "entryDate", "–")
                 url = fedlex_url(uri, lang)
-                results.append({
-                    "sr_number": sr_num, "title": title, "entry_date": entry,
-                    "uri": uri, "url": url,
-                })
+                results.append(
+                    {
+                        "sr_number": sr_num,
+                        "title": title,
+                        "entry_date": entry,
+                        "uri": uri,
+                        "url": url,
+                    }
+                )
                 md += f"### SR {sr_num}: {title}\n"
                 md += f"- **Inkrafttreten:** {entry}\n"
                 md += f"- **Link:** [{url}]({url})\n\n"
@@ -1282,9 +1374,14 @@ def _consultation_line(r: consultations.Consultation, *, with_days: bool = True)
     flag = " ⚠️ status_conflict" if r.status_conflict else ""
     deadline = r.deadline.isoformat() if r.deadline else "keine Frist"
     if with_days and r.days_remaining is not None:
-        days = "heute" if r.days_remaining == 0 else (
-            f"in {r.days_remaining} Tagen" if r.days_remaining > 0
-            else f"vor {abs(r.days_remaining)} Tagen abgelaufen"
+        days = (
+            "heute"
+            if r.days_remaining == 0
+            else (
+                f"in {r.days_remaining} Tagen"
+                if r.days_remaining > 0
+                else f"vor {abs(r.days_remaining)} Tagen abgelaufen"
+            )
         )
         head = f"### 📅 Frist {deadline} ({days}) — {r.title}{flag}\n"
     else:
@@ -1339,17 +1436,33 @@ def termdat_entry_url(concept_id: str) -> str:
     return f"https://www.termdat.bk.admin.ch/entry/{concept_id}"
 
 
-def _termdat_ok(tool: str, results: list[dict], markdown: str,
-                match_type: Literal["exact", "none"] = "exact",
-                message: str | None = None) -> FedlexResponse:
+def _termdat_ok(
+    tool: str,
+    results: list[dict],
+    markdown: str,
+    match_type: Literal["exact", "none"] = "exact",
+    message: str | None = None,
+) -> FedlexResponse:
     """Envelope für TERMDAT — trägt IMMER die TERMDAT-Attribution (Teilbestand)."""
-    return _ok(tool, results, markdown + TERMDAT_SOURCE, match_type=match_type,
-               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE, message=message)
+    return _ok(
+        tool,
+        results,
+        markdown + TERMDAT_SOURCE,
+        match_type=match_type,
+        source=ATTRIBUTION_TERMDAT,
+        license=TERMDAT_LICENSE,
+        message=message,
+    )
 
 
 def _termdat_empty(tool: str, markdown: str, message: str | None = None) -> FedlexResponse:
-    return _empty(tool, markdown + TERMDAT_SOURCE, source=ATTRIBUTION_TERMDAT,
-                  license=TERMDAT_LICENSE, message=message)
+    return _empty(
+        tool,
+        markdown + TERMDAT_SOURCE,
+        source=ATTRIBUTION_TERMDAT,
+        license=TERMDAT_LICENSE,
+        message=message,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1362,18 +1475,26 @@ class GetOpenConsultationsInput(BaseModel):
     keyword: str | None = Field(
         default=None,
         description="Optionaler exakter Titel-Teilstring, z.B. 'Datenschutz'. Achtung: eng — "
-                    "'Volksschule' findet 0 Treffer. Für Bildungsthemen `topic='education'` nutzen.",
-        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+        "'Volksschule' findet 0 Treffer. Für Bildungsthemen `topic='education'` nutzen.",
+        min_length=2,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     topic: Literal["education"] | None = Field(
         default=None,
         description="Themen-Stichwort-Union (Freitext, keine Taxonomie). 'education' deckt "
-                    "Bildung/Schule/Berufsbildung/Hochschule/… ab; die gesuchten Begriffe "
-                    "werden in der Antwort ausgewiesen.",
+        "Bildung/Schule/Berufsbildung/Hochschule/… ab; die gesuchten Begriffe "
+        "werden in der Antwort ausgewiesen.",
     )
-    language: Language = Field(default=Language.DE, description="Sprache des Titels: de, fr, it, rm")
-    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
-                       description=f"Maximale Trefferzahl (1–{MAX_RESULTS_LIMIT})")
+    language: Language = Field(
+        default=Language.DE, description="Sprache des Titels: de, fr, it, rm"
+    )
+    limit: int = Field(
+        default=MAX_RESULTS_DEFAULT,
+        ge=1,
+        le=MAX_RESULTS_LIMIT,
+        description=f"Maximale Trefferzahl (1–{MAX_RESULTS_LIMIT})",
+    )
 
 
 class SearchConsultationsInput(BaseModel):
@@ -1381,22 +1502,35 @@ class SearchConsultationsInput(BaseModel):
     keyword: str | None = Field(
         default=None,
         description="Suchbegriff in Titel und Beschreibung. Ohne Begriff: neueste Vernehmlassungen.",
-        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+        min_length=2,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     topic: Literal["education"] | None = Field(
         default=None,
         description="Themen-Stichwort-Union (Freitext im Titel). Die gesuchten Begriffe werden "
-                    "in der Antwort ausgewiesen.",
+        "in der Antwort ausgewiesen.",
     )
-    status: Literal[
-        "in_preparation", "planned", "running",
-        "closed_awaiting_opinions", "closed_awaiting_report", "closed", "withdrawn",
-    ] | None = Field(default=None, description="Optionaler Status-Filter (Kurzcode).")
+    status: (
+        Literal[
+            "in_preparation",
+            "planned",
+            "running",
+            "closed_awaiting_opinions",
+            "closed_awaiting_report",
+            "closed",
+            "withdrawn",
+        ]
+        | None
+    ) = Field(default=None, description="Optionaler Status-Filter (Kurzcode).")
     from_date: date | None = Field(default=None, description="Frist frühestens (eventEndDate >=).")
     to_date: date | None = Field(default=None, description="Frist spätestens (eventEndDate <=).")
     institution: str | None = Field(
-        default=None, description="Teilstring im federführenden Departement/Amt (deutsches Label).",
-        min_length=2, max_length=100, pattern=KEYWORD_PATTERN,
+        default=None,
+        description="Teilstring im federführenden Departement/Amt (deutsches Label).",
+        min_length=2,
+        max_length=100,
+        pattern=KEYWORD_PATTERN,
     )
     language: Language = Field(default=Language.DE)
     limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT)
@@ -1407,7 +1541,9 @@ class GetConsultationInput(BaseModel):
     event_id: str = Field(
         ...,
         description="eventId der Vernehmlassung, z.B. 'proj/2026/71/cons_1'.",
-        min_length=8, max_length=60, pattern=EVENT_ID_PATTERN,
+        min_length=8,
+        max_length=60,
+        pattern=EVENT_ID_PATTERN,
     )
     language: Language = Field(default=Language.DE)
 
@@ -1417,16 +1553,27 @@ class TermdatLookupInput(BaseModel):
     term: str = Field(
         ...,
         description="Fachbegriff, z.B. 'Volksschule', 'Datenschutz'.",
-        min_length=2, max_length=200, pattern=KEYWORD_PATTERN,
+        min_length=2,
+        max_length=200,
+        pattern=KEYWORD_PATTERN,
     )
     target_languages: list[TermLanguage] = Field(
-        default_factory=lambda: [TermLanguage.DE, TermLanguage.FR, TermLanguage.IT,
-                                 TermLanguage.RM, TermLanguage.EN],
+        default_factory=lambda: [
+            TermLanguage.DE,
+            TermLanguage.FR,
+            TermLanguage.IT,
+            TermLanguage.RM,
+            TermLanguage.EN,
+        ],
         description="Zielsprachen der Entsprechungen (de, fr, it, rm, en). Standard: alle.",
         max_length=5,
     )
-    limit: int = Field(default=MAX_RESULTS_DEFAULT, ge=1, le=MAX_RESULTS_LIMIT,
-                       description="Maximale Zahl unterschiedlicher Konzepte.")
+    limit: int = Field(
+        default=MAX_RESULTS_DEFAULT,
+        ge=1,
+        le=MAX_RESULTS_LIMIT,
+        description="Maximale Zahl unterschiedlicher Konzepte.",
+    )
 
 
 class TermdatGetConceptInput(BaseModel):
@@ -1438,7 +1585,9 @@ class TermdatGetConceptInput(BaseModel):
             "'https://register.ld.admin.ch/termdat/40109' oder eine Term-URI "
             "wie '…/termdat/40109/3/de'."
         ),
-        min_length=1, max_length=120, pattern=TERMDAT_INPUT_PATTERN,
+        min_length=1,
+        max_length=120,
+        pattern=TERMDAT_INPUT_PATTERN,
     )
 
 
@@ -1565,19 +1714,35 @@ async def fedlex_search_consultations(
     terms = consultations.effective_terms(params.topic, None)
     filter_note = consultations.describe_filter(params.topic, terms)
     status_uri = CONSULTATION_STATUS_ALIASES[params.status] if params.status else None
-    await _trace(ctx, tool, lang=lang, topic=params.topic, has_keyword=bool(params.keyword),
-                 status=params.status)
+    await _trace(
+        ctx,
+        tool,
+        lang=lang,
+        topic=params.topic,
+        has_keyword=bool(params.keyword),
+        status=params.status,
+    )
 
     query = consultations.build_search_query(
-        lang, terms, params.keyword, status_uri,
-        params.from_date, params.to_date, params.institution, params.limit,
+        lang,
+        terms,
+        params.keyword,
+        status_uri,
+        params.from_date,
+        params.to_date,
+        params.institution,
+        params.limit,
     )
 
     async with _tool_span(tool, lang=lang, status=params.status):
         try:
             bindings = await run_sparql(query)
 
-            kw_txt = f"'{params.topic or params.keyword}'" if (params.topic or params.keyword) else "alle"
+            kw_txt = (
+                f"'{params.topic or params.keyword}'"
+                if (params.topic or params.keyword)
+                else "alle"
+            )
             if not bindings:
                 md = (
                     f"Keine Vernehmlassungen für {kw_txt} mit den gewählten Filtern [{lang.upper()}]."
@@ -1820,27 +1985,37 @@ SELECT ?c ?id ?name ?nl ?desc ?dl WHERE {{
                 c = concepts[cid]
                 names = {lang: c["names"].get(lang) for lang in langs}
                 url = termdat_entry_url(cid)
-                results.append({
-                    "concept_id": cid,
-                    "names": names,
-                    "descriptions": c["descriptions"],
-                    "uri": c["uri"],
-                    "url": url,
-                })
+                results.append(
+                    {
+                        "concept_id": cid,
+                        "names": names,
+                        "descriptions": c["descriptions"],
+                        "uri": c["uri"],
+                        "url": url,
+                    }
+                )
                 headline = c["names"].get("de") or next(iter(c["names"].values()), params.term)
                 md += f"### {headline}  ·  TERMDAT {cid}\n"
                 for lang in langs:
                     if names.get(lang):
                         md += f"- **{lang.upper()}:** {names[lang]}\n"
-                definition = c["descriptions"].get("de") or next(iter(c["descriptions"].values()), None)
+                definition = c["descriptions"].get("de") or next(
+                    iter(c["descriptions"].values()), None
+                )
                 if definition:
                     md += f"- **Definition:** {definition}\n"
                 md += f"- **Eintrag:** [{url}]({url})\n\n"
             return _termdat_ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e, service="TERMDAT (LINDAS)",
-                               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE)
+            return await _fail(
+                ctx,
+                tool,
+                e,
+                service="TERMDAT (LINDAS)",
+                source=ATTRIBUTION_TERMDAT,
+                license=TERMDAT_LICENSE,
+            )
 
 
 @mcp.tool(
@@ -1871,13 +2046,10 @@ async def termdat_get_concept(
 
     cid = termdat_concept_id(params.concept)
     if cid is None:
-        md = (
-            f"Ungültige TERMDAT-Referenz: **{params.concept}**."
-            + no_match_hint(
-                "**Erwartet:** eine ID wie '40109', eine URI "
-                "'https://register.ld.admin.ch/termdat/40109' oder eine Term-URI "
-                "'…/termdat/40109/3/de'."
-            )
+        md = f"Ungültige TERMDAT-Referenz: **{params.concept}**." + no_match_hint(
+            "**Erwartet:** eine ID wie '40109', eine URI "
+            "'https://register.ld.admin.ch/termdat/40109' oder eine Term-URI "
+            "'…/termdat/40109/3/de'."
         )
         return _termdat_empty(tool, md)
 
@@ -1932,7 +2104,8 @@ SELECT ?syn ?name ?nl WHERE {{
             syn_rows = await run_lindas(syn_query)
             synonyms = [
                 {"name": val(b, "name"), "language": val(b, "nl") or None, "uri": val(b, "syn")}
-                for b in syn_rows if val(b, "name")
+                for b in syn_rows
+                if val(b, "name")
             ]
 
             record = {
@@ -1967,8 +2140,14 @@ SELECT ?syn ?name ?nl WHERE {{
             return _termdat_ok(tool, [record], md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e, service="TERMDAT (LINDAS)",
-                               source=ATTRIBUTION_TERMDAT, license=TERMDAT_LICENSE)
+            return await _fail(
+                ctx,
+                tool,
+                e,
+                service="TERMDAT (LINDAS)",
+                source=ATTRIBUTION_TERMDAT,
+                license=TERMDAT_LICENSE,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1980,9 +2159,7 @@ SELECT ?syn ?name ?nl WHERE {{
 async def get_sr_resource(sr_number: str) -> str:
     """Ressource: Erlass der SR per SR-Nummer (Deutsch). Liefert die
     menschenlesbare Markdown-Aufbereitung aus dem Tool-Envelope."""
-    resp = await fedlex_get_law_by_sr(
-        GetLawBySrInput(sr_number=sr_number, language=Language.DE)
-    )
+    resp = await fedlex_get_law_by_sr(GetLawBySrInput(sr_number=sr_number, language=Language.DE))
     return resp.markdown
 
 
@@ -2047,18 +2224,20 @@ async def compute_tool_signature_hash() -> str:
     payload: list[dict[str, Any]] = []
     for t in sorted(tools, key=lambda x: x.name):
         ann = getattr(t, "annotations", None)
-        payload.append({
-            "name": t.name,
-            "description": t.description,
-            "inputSchema": t.input_schema,
-            "outputSchema": getattr(t, "output_schema", None),
-            # by_alias keeps the wire spelling (readOnlyHint, ...): mcp_types
-            # 2.x renamed the Python fields to snake_case, and a bare dump
-            # would silently change this hash without any contract change.
-            "annotations": (
-                ann.model_dump(mode="json", by_alias=True) if ann is not None else None
-            ),
-        })
+        payload.append(
+            {
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.input_schema,
+                "outputSchema": getattr(t, "output_schema", None),
+                # by_alias keeps the wire spelling (readOnlyHint, ...): mcp_types
+                # 2.x renamed the Python fields to snake_case, and a bare dump
+                # would silently change this hash without any contract change.
+                "annotations": (
+                    ann.model_dump(mode="json", by_alias=True) if ann is not None else None
+                ),
+            }
+        )
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -2146,9 +2325,7 @@ def build_transport_security(host: str, port: int):
     # sonst weist der Server genau die Browser-Clients ab, die CORS erlaubt.
     # ``*`` ist nicht ausdrückbar (Origins werden literal verglichen).
     origins = {
-        o.strip()
-        for o in settings.allowed_origins.split(",")
-        if o.strip() and o.strip() != "*"
+        o.strip() for o in settings.allowed_origins.split(",") if o.strip() and o.strip() != "*"
     }
     origins |= {f"http://{h}" for h in hosts}
     return TransportSecuritySettings(

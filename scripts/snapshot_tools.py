@@ -10,6 +10,7 @@ live definitions drift from the lock without a regenerate, catching silent
 Usage:
     PYTHONPATH=src python scripts/snapshot_tools.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,9 +28,14 @@ async def main() -> None:
     tools = sorted(t.name for t in await server.mcp.list_tools())
     LOCK_PATH.write_text(
         json.dumps(
-            {"sha256": digest, "tool_count": len(tools), "tools": tools,
-             "generated_on": date.today().isoformat()},
-            indent=2, ensure_ascii=False,
+            {
+                "sha256": digest,
+                "tool_count": len(tools),
+                "tools": tools,
+                "generated_on": date.today().isoformat(),
+            },
+            indent=2,
+            ensure_ascii=False,
         )
         + "\n",
         encoding="utf-8",
