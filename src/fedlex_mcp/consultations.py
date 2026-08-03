@@ -70,7 +70,8 @@ CONSULTATION_STATUS_LABELS = {
     CONSULTATION_STATUS_BASE + "0": "In Vorbereitung",
     CONSULTATION_STATUS_BASE + "1": "Geplant",
     CONSULTATION_STATUS_BASE + "2": "Laufend",
-    CONSULTATION_STATUS_BASE + "3": "Abgeschlossen – abwarten Stellungnahmen und/oder des Ergebnisberichts",
+    CONSULTATION_STATUS_BASE
+    + "3": "Abgeschlossen – abwarten Stellungnahmen und/oder des Ergebnisberichts",
     CONSULTATION_STATUS_BASE + "4": "Abgeschlossen – abwarten Ergebnisbericht",
     CONSULTATION_STATUS_BASE + "5": "Abgeschlossen",
     CONSULTATION_STATUS_BASE + "6": "Zurückgezogen",
@@ -100,9 +101,19 @@ DERIVED_CLOSED = "Abgeschlossen"
 # «Volksschule» selbst findet im Titel 0 Treffer.
 TOPIC_KEYWORDS: dict[str, list[str]] = {
     "education": [
-        "bildung", "schule", "berufsbildung", "weiterbildung", "hochschul",
-        "lehrplan", "lehrmittel", "lehrperson", "pädagog", "kindergarten",
-        "matur", "studien", "unterricht",
+        "bildung",
+        "schule",
+        "berufsbildung",
+        "weiterbildung",
+        "hochschul",
+        "lehrplan",
+        "lehrmittel",
+        "lehrperson",
+        "pädagog",
+        "kindergarten",
+        "matur",
+        "studien",
+        "unterricht",
     ],
 }
 
@@ -136,7 +147,9 @@ def describe_filter(topic: str | None, terms: list[str]) -> str | None:
     base = f"Themenfilter «{topic}»: " if topic else "Stichwortfilter: "
     return (
         base
-        + "Titel enthält eines von [" + ", ".join(terms) + "] "
+        + "Titel enthält eines von ["
+        + ", ".join(terms)
+        + "] "
         + "(Freitextsuche im Titel — keine Sachgebiets-Taxonomie vorhanden)."
     )
 
@@ -265,9 +278,7 @@ def _title_contains_any(terms: list[str]) -> str:
     auf diesem Endpoint kaputt, s. Modul-Docstring)."""
     if not terms:
         return ""
-    clauses = " || ".join(
-        f'CONTAINS(LCASE(STR(?title)), "{sparql_escape(t)}")' for t in terms
-    )
+    clauses = " || ".join(f'CONTAINS(LCASE(STR(?title)), "{sparql_escape(t)}")' for t in terms)
     return f"FILTER({clauses})"
 
 
@@ -337,9 +348,13 @@ def build_search_query(
     if status_uri:
         filters.append(f"FILTER(?status = <{status_uri}>)")
     if from_date:
-        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) >= "{from_date.isoformat()}"^^xsd:date)')
+        filters.append(
+            f'FILTER(BOUND(?end) && xsd:date(?end) >= "{from_date.isoformat()}"^^xsd:date)'
+        )
     if to_date:
-        filters.append(f'FILTER(BOUND(?end) && xsd:date(?end) <= "{to_date.isoformat()}"^^xsd:date)')
+        filters.append(
+            f'FILTER(BOUND(?end) && xsd:date(?end) <= "{to_date.isoformat()}"^^xsd:date)'
+        )
     if institution:
         esc_inst = sparql_escape(institution.lower())
         filters.append(

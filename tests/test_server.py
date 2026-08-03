@@ -8,6 +8,7 @@ Tools return a structured ``FedlexResponse`` envelope (SDK-002): assertions
 check ``.results`` / ``.match_type`` / ``.count`` for structure and ``.markdown``
 for the human-readable rendering.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,6 +59,7 @@ def _binding(**fields: str) -> dict:
 # Pure-function unit tests
 # ---------------------------------------------------------------------------
 
+
 def test_sparql_escape_neutralises_quote_breakout() -> None:
     assert sparql_escape('foo" } INJECT') == 'foo\\" } INJECT'
 
@@ -85,6 +87,7 @@ def test_assert_host_allowed_blocks_foreign_host() -> None:
 # ---------------------------------------------------------------------------
 # Input validation (SEC-018)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("bad", ['a" } INJECT', "back\\slash", "brace{", "<tag>"])
 def test_keywords_pattern_rejects_injection(bad: str) -> None:
@@ -122,14 +125,23 @@ def test_limit_out_of_range_rejected() -> None:
 # Tool happy-paths — structured envelope (SDK-002)
 # ---------------------------------------------------------------------------
 
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_search_laws_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/235.1",
-                 title="Bundesgesetz über den Datenschutz", titleShort="DSG",
-                 srNumber="235.1", inForceStatus=server.STATUS_IN_FORCE),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/235.1",
+                    title="Bundesgesetz über den Datenschutz",
+                    titleShort="DSG",
+                    srNumber="235.1",
+                    inForceStatus=server.STATUS_IN_FORCE,
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_search_laws(SearchLawsInput(keywords="Datenschutz"))
     assert resp.match_type == "exact"
     assert resp.count == 1
@@ -154,11 +166,20 @@ async def test_search_laws_empty_envelope() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_law_by_sr_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/101",
-                 title="Bundesverfassung", titleShort="BV", srNumber="101",
-                 inForceStatus=server.STATUS_IN_FORCE, entryDate="2000-01-01"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/101",
+                    title="Bundesverfassung",
+                    titleShort="BV",
+                    srNumber="101",
+                    inForceStatus=server.STATUS_IN_FORCE,
+                    entryDate="2000-01-01",
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_get_law_by_sr(GetLawBySrInput(sr_number="101"))
     assert resp.count == 1
     assert resp.results[0]["title"] == "Bundesverfassung"
@@ -168,10 +189,17 @@ async def test_get_law_by_sr_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_recent_publications_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(act="https://fedlex.data.admin.ch/eli/oc/2026/1",
-                 title="Neue Verordnung", pubDate="2026-05-01"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    act="https://fedlex.data.admin.ch/eli/oc/2026/1",
+                    title="Neue Verordnung",
+                    pubDate="2026-05-01",
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_get_recent_publications(GetRecentPublicationsInput(days=30))
     assert resp.results[0]["publication_date"] == "2026-05-01"
     assert "Neue Verordnung" in resp.markdown
@@ -180,11 +208,19 @@ async def test_get_recent_publications_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_upcoming_changes_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/999",
-                 title="Künftiges Gesetz", titleShort="KG", srNumber="999",
-                 entryDate="2026-12-01"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/999",
+                    title="Künftiges Gesetz",
+                    titleShort="KG",
+                    srNumber="999",
+                    entryDate="2026-12-01",
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_get_upcoming_changes(GetUpcomingChangesInput(days_ahead=90))
     assert resp.results[0]["entry_date"] == "2026-12-01"
     assert "Künftiges Gesetz" in resp.markdown
@@ -193,11 +229,20 @@ async def test_get_upcoming_changes_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_search_gazette_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(act="https://fedlex.data.admin.ch/eli/fga/2024/1",
-                 title="Botschaft zur Berufsbildung", pubDate="2024-03-01"),
-    ]))
-    resp = await server.fedlex_search_gazette(SearchGazetteInput(keywords="Berufsbildung", year=2024))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    act="https://fedlex.data.admin.ch/eli/fga/2024/1",
+                    title="Botschaft zur Berufsbildung",
+                    pubDate="2024-03-01",
+                ),
+            ]
+        )
+    )
+    resp = await server.fedlex_search_gazette(
+        SearchGazetteInput(keywords="Berufsbildung", year=2024)
+    )
     assert resp.count == 1
     assert "Berufsbildung" in resp.markdown
 
@@ -205,14 +250,26 @@ async def test_search_gazette_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_law_history_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/235.1/2023",
-                 title="DSG", srNumber="235.1", entryDate="2023-09-01",
-                 inForceStatus=server.STATUS_IN_FORCE),
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/235.1/1993",
-                 title="DSG", srNumber="235.1", entryDate="1993-07-01",
-                 inForceStatus=server.STATUS_NO_LONGER_FORCE),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/235.1/2023",
+                    title="DSG",
+                    srNumber="235.1",
+                    entryDate="2023-09-01",
+                    inForceStatus=server.STATUS_IN_FORCE,
+                ),
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/235.1/1993",
+                    title="DSG",
+                    srNumber="235.1",
+                    entryDate="1993-07-01",
+                    inForceStatus=server.STATUS_NO_LONGER_FORCE,
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_get_law_history(GetLawHistoryInput(sr_number="235.1"))
     assert resp.count == 2
     assert {r["version"] for r in resp.results} == {1, 2}
@@ -222,10 +279,18 @@ async def test_get_law_history_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_search_treaties_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/0.101",
-                 title="EMRK", srNumber="0.101", entryDate="1974-11-28"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    ca="https://fedlex.data.admin.ch/eli/cc/0.101",
+                    title="EMRK",
+                    srNumber="0.101",
+                    entryDate="1974-11-28",
+                ),
+            ]
+        )
+    )
     resp = await server.fedlex_search_treaties(SearchTreatiesInput(keywords="EMRK"))
     assert resp.results[0]["sr_number"] == "0.101"
 
@@ -233,6 +298,7 @@ async def test_search_treaties_happy() -> None:
 # ---------------------------------------------------------------------------
 # Error handling (OBS-001 / OBS-002) — masked, structured error envelope
 # ---------------------------------------------------------------------------
+
 
 @respx.mock
 @pytest.mark.asyncio
@@ -263,6 +329,7 @@ def test_handle_error_generic_does_not_leak_repr() -> None:
 # ---------------------------------------------------------------------------
 # Config / wiring / observability
 # ---------------------------------------------------------------------------
+
 
 def test_shared_client_default_is_none_outside_lifespan() -> None:
     assert server._http_client is None
@@ -295,9 +362,13 @@ def test_server_imports() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_tool_accepts_ctx_none() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(ca="https://fedlex.data.admin.ch/eli/cc/101", title="BV", srNumber="101"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(ca="https://fedlex.data.admin.ch/eli/cc/101", title="BV", srNumber="101"),
+            ]
+        )
+    )
     resp = await server.fedlex_search_laws(SearchLawsInput(keywords="Verfassung"), ctx=None)
     assert resp.count == 1
 
@@ -310,6 +381,7 @@ def test_sr_number_format_valid(sr_number: str) -> None:
 # ---------------------------------------------------------------------------
 # Tool-definition hash pinning (SEC-022)
 # ---------------------------------------------------------------------------
+
 
 def test_tool_definitions_match_lock() -> None:
     """The live tool definitions must match the committed lock file. If this
@@ -327,6 +399,7 @@ def test_tool_definitions_match_lock() -> None:
 # ---------------------------------------------------------------------------
 # Tool allow-list (SEC-014) — default-deny via FEDLEX_ENABLED_TOOLS
 # ---------------------------------------------------------------------------
+
 
 def test_tool_allowlist_default_exposes_all() -> None:
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
@@ -361,16 +434,25 @@ def test_tool_allowlist_env_default_deny() -> None:
 CONS_URI = "https://fedlex.data.admin.ch/eli/dl/proj/2026/71/cons_1"
 
 
-def _open_cons_binding(end: str, status: str = server.CONSULTATION_STATUS_RUNNING,
-                       title: str = "Bildungsreform Volksschule") -> dict:
+def _open_cons_binding(
+    end: str,
+    status: str = server.CONSULTATION_STATUS_RUNNING,
+    title: str = "Bildungsreform Volksschule",
+) -> dict:
     return _binding(
-        c=CONS_URI, eventId="proj/2026/71/cons_1", title=title, status=status,
-        start="2026-06-01", end=end, instLabel="Departement für Bildung",
+        c=CONS_URI,
+        eventId="proj/2026/71/cons_1",
+        title=title,
+        status=status,
+        start="2026-06-01",
+        end=end,
+        instLabel="Departement für Bildung",
         inst2Label="Bundesamt für Kultur",
     )
 
 
 # --- Happy paths (new tools) ------------------------------------------------
+
 
 @respx.mock
 @pytest.mark.asyncio
@@ -403,9 +485,13 @@ async def test_open_consultations_empty_states_timestamp() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_search_consultations_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _open_cons_binding("2026-03-01", status=server.CONSULTATION_STATUS_BASE + "5"),
-    ]))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _open_cons_binding("2026-03-01", status=server.CONSULTATION_STATUS_BASE + "5"),
+            ]
+        )
+    )
     resp = await server.fedlex_search_consultations(
         SearchConsultationsInput(keyword="Bildung", status="closed")
     )
@@ -416,14 +502,27 @@ async def test_search_consultations_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_consultation_happy() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(c=CONS_URI, title="Bildungsreform", desc="Beschreibung der Vorlage",
-                 status=server.CONSULTATION_STATUS_RUNNING, start="2026-06-01", end="2099-09-01",
-                 instLabel="Departement für Bildung", inst2Label="Bundesamt für Kultur",
-                 draft="https://fedlex.data.admin.ch/eli/dl/proj/2026/71/cons_1/doc_1",
-                 impact="https://fedlex.data.admin.ch/eli/cc/2014/771"),
-    ]))
-    resp = await server.fedlex_get_consultation(GetConsultationInput(event_id="proj/2026/71/cons_1"))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    c=CONS_URI,
+                    title="Bildungsreform",
+                    desc="Beschreibung der Vorlage",
+                    status=server.CONSULTATION_STATUS_RUNNING,
+                    start="2026-06-01",
+                    end="2099-09-01",
+                    instLabel="Departement für Bildung",
+                    inst2Label="Bundesamt für Kultur",
+                    draft="https://fedlex.data.admin.ch/eli/dl/proj/2026/71/cons_1/doc_1",
+                    impact="https://fedlex.data.admin.ch/eli/cc/2014/771",
+                ),
+            ]
+        )
+    )
+    resp = await server.fedlex_get_consultation(
+        GetConsultationInput(event_id="proj/2026/71/cons_1")
+    )
     assert resp.count == 1
     r = resp.results[0]
     assert r["deadline"] == "2099-09-01"
@@ -435,18 +534,37 @@ async def test_get_consultation_happy() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_termdat_lookup_happy() -> None:
-    respx.get(LINDAS).mock(side_effect=[
-        _sparql_response([_binding(s="https://register.ld.admin.ch/termdat/40109/3/de",
-                                   name="Volksschule")]),
-        _sparql_response([
-            _binding(c="https://register.ld.admin.ch/termdat/40109", id="40109",
-                     name="obligatorische Schule", nl="de", desc="Bildungsstufe …", dl="de"),
-            _binding(c="https://register.ld.admin.ch/termdat/40109", id="40109",
-                     name="scolarité obligatoire", nl="fr"),
-            _binding(c="https://register.ld.admin.ch/termdat/40109", id="40109",
-                     name="scuola dell'obbligo", nl="it"),
-        ]),
-    ])
+    respx.get(LINDAS).mock(
+        side_effect=[
+            _sparql_response(
+                [_binding(s="https://register.ld.admin.ch/termdat/40109/3/de", name="Volksschule")]
+            ),
+            _sparql_response(
+                [
+                    _binding(
+                        c="https://register.ld.admin.ch/termdat/40109",
+                        id="40109",
+                        name="obligatorische Schule",
+                        nl="de",
+                        desc="Bildungsstufe …",
+                        dl="de",
+                    ),
+                    _binding(
+                        c="https://register.ld.admin.ch/termdat/40109",
+                        id="40109",
+                        name="scolarité obligatoire",
+                        nl="fr",
+                    ),
+                    _binding(
+                        c="https://register.ld.admin.ch/termdat/40109",
+                        id="40109",
+                        name="scuola dell'obbligo",
+                        nl="it",
+                    ),
+                ]
+            ),
+        ]
+    )
     resp = await server.termdat_lookup_term(
         TermdatLookupInput(term="Volksschule", target_languages=["de", "fr", "it"])
     )
@@ -473,17 +591,32 @@ async def test_termdat_lookup_negative_flags_partial_dataset() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_termdat_get_concept_happy_accepts_term_uri() -> None:
-    respx.get(LINDAS).mock(side_effect=[
-        _sparql_response([
-            _binding(name="obligatorische Schule", nl="de", desc="Bildungsstufe …", dl="de",
-                     url="https://www.termdat.bk.admin.ch/entry/40109",
-                     mod="2021-05-12T09:32:03Z"),
-            _binding(name="compulsory education", nl="en"),
-        ]),
-        _sparql_response([
-            _binding(syn="https://register.ld.admin.ch/termdat/40109/3/de", name="Volksschule", nl="de"),
-        ]),
-    ])
+    respx.get(LINDAS).mock(
+        side_effect=[
+            _sparql_response(
+                [
+                    _binding(
+                        name="obligatorische Schule",
+                        nl="de",
+                        desc="Bildungsstufe …",
+                        dl="de",
+                        url="https://www.termdat.bk.admin.ch/entry/40109",
+                        mod="2021-05-12T09:32:03Z",
+                    ),
+                    _binding(name="compulsory education", nl="en"),
+                ]
+            ),
+            _sparql_response(
+                [
+                    _binding(
+                        syn="https://register.ld.admin.ch/termdat/40109/3/de",
+                        name="Volksschule",
+                        nl="de",
+                    ),
+                ]
+            ),
+        ]
+    )
     # Term-URI mit Suffix muss auf Konzept 40109 normalisiert werden (Quirk 3).
     resp = await server.termdat_get_concept(
         TermdatGetConceptInput(concept="https://register.ld.admin.ch/termdat/40109/3/de")
@@ -500,28 +633,44 @@ def test_termdat_get_concept_invalid_reference() -> None:
     assert "Ungültige TERMDAT-Referenz" in resp.markdown
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("40109", "40109"),
-    ("https://register.ld.admin.ch/termdat/40109", "40109"),
-    ("https://register.ld.admin.ch/termdat/40109/3/de", "40109"),
-    ("https://www.termdat.bk.admin.ch/entry/40109", "40109"),
-    ("not-an-id", None),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("40109", "40109"),
+        ("https://register.ld.admin.ch/termdat/40109", "40109"),
+        ("https://register.ld.admin.ch/termdat/40109/3/de", "40109"),
+        ("https://www.termdat.bk.admin.ch/entry/40109", "40109"),
+        ("not-an-id", None),
+    ],
+)
 def test_termdat_concept_id_normalisation(raw: str, expected: str | None) -> None:
     assert server.termdat_concept_id(raw) == expected
 
 
 # --- Quirk 1: status vs. deadline conflict ---------------------------------
 
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_quirk1_status_running_but_deadline_past_flags_conflict() -> None:
     # Status «Laufend» (/2), aber Frist längst abgelaufen → status_conflict.
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(c=CONS_URI, title="Alte Vorlage", status=server.CONSULTATION_STATUS_RUNNING,
-                 start="2019-01-01", end="2020-01-01", instLabel="Departement"),
-    ]))
-    resp = await server.fedlex_get_consultation(GetConsultationInput(event_id="proj/2026/71/cons_1"))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    c=CONS_URI,
+                    title="Alte Vorlage",
+                    status=server.CONSULTATION_STATUS_RUNNING,
+                    start="2019-01-01",
+                    end="2020-01-01",
+                    instLabel="Departement",
+                ),
+            ]
+        )
+    )
+    resp = await server.fedlex_get_consultation(
+        GetConsultationInput(event_id="proj/2026/71/cons_1")
+    )
     assert resp.results[0]["status_conflict"] is True
     assert "status_conflict" in resp.markdown
 
@@ -552,21 +701,31 @@ def test_deadline_status_pure_date_wins() -> None:
 def test_days_until_pure_calendar_semantics() -> None:
     today = date(2026, 7, 20)
     assert consultations.days_until(date(2026, 7, 25), today) == 5
-    assert consultations.days_until(date(2026, 7, 20), today) == 0   # Frist heute
+    assert consultations.days_until(date(2026, 7, 20), today) == 0  # Frist heute
     assert consultations.days_until(date(2026, 7, 19), today) == -1  # gestern abgelaufen
     assert consultations.days_until(None, today) is None
 
 
 # --- Quirk: consultation without hasSubTask --------------------------------
 
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_consultation_without_subtask_returns_null_deadline() -> None:
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(c=CONS_URI, title="Ohne Teilaufgabe",
-                 status=server.CONSULTATION_STATUS_BASE + "1"),
-    ]))
-    resp = await server.fedlex_get_consultation(GetConsultationInput(event_id="proj/2026/71/cons_1"))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    c=CONS_URI,
+                    title="Ohne Teilaufgabe",
+                    status=server.CONSULTATION_STATUS_BASE + "1",
+                ),
+            ]
+        )
+    )
+    resp = await server.fedlex_get_consultation(
+        GetConsultationInput(event_id="proj/2026/71/cons_1")
+    )
     assert resp.match_type == "exact"
     assert resp.results[0]["deadline"] is None
     assert resp.results[0]["status_conflict"] is False
@@ -575,14 +734,17 @@ async def test_consultation_without_subtask_returns_null_deadline() -> None:
 
 # --- Retry on transient 503 -------------------------------------------------
 
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_retry_on_503_then_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server, "RETRY_BASE_DELAY", 0)
-    respx.get(ENDPOINT).mock(side_effect=[
-        httpx.Response(503, text="temporarily unavailable"),
-        _sparql_response([_open_cons_binding("2099-09-01")]),
-    ])
+    respx.get(ENDPOINT).mock(
+        side_effect=[
+            httpx.Response(503, text="temporarily unavailable"),
+            _sparql_response([_open_cons_binding("2099-09-01")]),
+        ]
+    )
     resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
     assert resp.match_type == "exact"
     assert resp.count == 1
@@ -592,13 +754,23 @@ async def test_retry_on_503_then_success(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.asyncio
 async def test_retry_on_503_lindas(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server, "RETRY_BASE_DELAY", 0)
-    respx.get(LINDAS).mock(side_effect=[
-        httpx.Response(503),
-        _sparql_response([_binding(s="https://register.ld.admin.ch/termdat/40109/3/de",
-                                   name="Volksschule")]),
-        _sparql_response([_binding(c="https://register.ld.admin.ch/termdat/40109",
-                                   name="obligatorische Schule", nl="de")]),
-    ])
+    respx.get(LINDAS).mock(
+        side_effect=[
+            httpx.Response(503),
+            _sparql_response(
+                [_binding(s="https://register.ld.admin.ch/termdat/40109/3/de", name="Volksschule")]
+            ),
+            _sparql_response(
+                [
+                    _binding(
+                        c="https://register.ld.admin.ch/termdat/40109",
+                        name="obligatorische Schule",
+                        nl="de",
+                    )
+                ]
+            ),
+        ]
+    )
     resp = await server.termdat_lookup_term(TermdatLookupInput(term="Volksschule"))
     assert resp.count == 1
 
@@ -615,6 +787,7 @@ async def test_400_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # --- Timeout / network error → clean masked error ---------------------------
 
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_lindas_timeout_masked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -627,6 +800,7 @@ async def test_lindas_timeout_masked(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --- Isolation: LINDAS down, fedlex_* still works ---------------------------
+
 
 @respx.mock
 @pytest.mark.asyncio
@@ -644,6 +818,7 @@ async def test_isolation_lindas_down_fedlex_ok(monkeypatch: pytest.MonkeyPatch) 
 
 
 # --- SPARQL escaping: quote/backslash must not break the query --------------
+
 
 @respx.mock
 @pytest.mark.asyncio
@@ -676,6 +851,7 @@ def test_event_id_pattern_rejects_malformed() -> None:
 
 
 # --- Wiring for the two isolated clients ------------------------------------
+
 
 def test_lindas_client_default_is_none_outside_lifespan() -> None:
     assert server._lindas_client is None
@@ -731,15 +907,26 @@ async def test_deadline_today_is_open_zero_days(frozen_today: date) -> None:
 async def test_deadline_yesterday_closed_and_date_wins(frozen_today: date) -> None:
     # Pflichtfälle 2 & 4: Frist gestern abgelaufen, Quelle meldet «Laufend» →
     # Status «Abgeschlossen» (Datum gewinnt), Diskrepanz ausgewiesen.
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _binding(c=CONS_URI, title="Abgelaufene Vorlage",
-                 status=server.CONSULTATION_STATUS_RUNNING, start="2026-05-01", end="2026-07-19",
-                 instLabel="Departement"),
-    ]))
-    resp = await server.fedlex_get_consultation(GetConsultationInput(event_id="proj/2026/71/cons_1"))
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _binding(
+                    c=CONS_URI,
+                    title="Abgelaufene Vorlage",
+                    status=server.CONSULTATION_STATUS_RUNNING,
+                    start="2026-05-01",
+                    end="2026-07-19",
+                    instLabel="Departement",
+                ),
+            ]
+        )
+    )
+    resp = await server.fedlex_get_consultation(
+        GetConsultationInput(event_id="proj/2026/71/cons_1")
+    )
     r = resp.results[0]
-    assert r["status"] == "Abgeschlossen"       # Datum gewinnt, nicht «Laufend»
-    assert r["status_source"] == "Laufend"      # rohes Quell-Label bleibt sichtbar
+    assert r["status"] == "Abgeschlossen"  # Datum gewinnt, nicht «Laufend»
+    assert r["status_source"] == "Laufend"  # rohes Quell-Label bleibt sichtbar
     assert r["days_remaining"] == -1
     assert r["is_open"] is False
     assert r["status_conflict"] is True
@@ -762,20 +949,24 @@ async def test_open_query_excludes_expired_and_dedupes_language(frozen_today: da
     await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
     q = captured["query"]
     assert 'xsd:date(?end) >= "2026-07-20"^^xsd:date' in q  # Frist-Grenze = heute
-    assert 'FILTER(LANG(?title) = "de")' in q               # Sprach-Dedupe
+    assert 'FILTER(LANG(?title) = "de")' in q  # Sprach-Dedupe
 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_topic_education_finds_known_template_and_discloses_strategy(frozen_today: date) -> None:
+async def test_topic_education_finds_known_template_and_discloses_strategy(
+    frozen_today: date,
+) -> None:
     # Pflichtfall 5: Themenfilter findet eine bekannte Bildungsvorlage; die
     # verwendete Stichwortstrategie wird in der Antwort ausgewiesen.
-    respx.get(ENDPOINT).mock(return_value=_sparql_response([
-        _open_cons_binding("2026-09-01", title="Totalrevision Berufsbildungsgesetz"),
-    ]))
-    resp = await server.fedlex_get_open_consultations(
-        GetOpenConsultationsInput(topic="education")
+    respx.get(ENDPOINT).mock(
+        return_value=_sparql_response(
+            [
+                _open_cons_binding("2026-09-01", title="Totalrevision Berufsbildungsgesetz"),
+            ]
+        )
     )
+    resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput(topic="education"))
     assert resp.count == 1
     assert "Berufsbildungsgesetz" in resp.markdown
     assert "Themenfilter" in resp.markdown
@@ -784,14 +975,15 @@ async def test_topic_education_finds_known_template_and_discloses_strategy(froze
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_open_consultations_endpoint_unreachable_explains(frozen_today: date,
-                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_open_consultations_endpoint_unreachable_explains(
+    frozen_today: date, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Pflichtfall 7: Endpoint nicht erreichbar → erklärender Fehler, kein leeres
     # (fälschlich beruhigendes) Resultat.
     monkeypatch.setattr(server, "RETRY_BASE_DELAY", 0)
     respx.get(ENDPOINT).mock(side_effect=httpx.ConnectError("network down"))
     resp = await server.fedlex_get_open_consultations(GetOpenConsultationsInput())
-    assert resp.match_type == "error"          # NICHT "none"
+    assert resp.match_type == "error"  # NICHT "none"
     assert "Verbindung zu Fedlex" in resp.markdown
     assert "network down" not in resp.markdown
 
@@ -799,8 +991,15 @@ async def test_open_consultations_endpoint_unreachable_explains(frozen_today: da
 def test_consultation_model_has_mandatory_fields() -> None:
     """Das typisierte Modell führt alle spezifizierten Pflichtfelder."""
     required = {
-        "title", "status", "opened_on", "deadline", "days_remaining",
-        "lead_office", "source_url", "retrieved_at", "language",
+        "title",
+        "status",
+        "opened_on",
+        "deadline",
+        "days_remaining",
+        "lead_office",
+        "source_url",
+        "retrieved_at",
+        "language",
     }
     assert required <= set(consultations.Consultation.model_fields)
 
@@ -808,6 +1007,7 @@ def test_consultation_model_has_mandatory_fields() -> None:
 # ---------------------------------------------------------------------------
 # Live smoke test (skipped in CI via: pytest -m 'not live')
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.live
 @pytest.mark.asyncio
