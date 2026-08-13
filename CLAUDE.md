@@ -45,16 +45,15 @@ Ein Codex-Review auf einem PR wird beantwortet oder behoben, nie ignoriert.
 
 ## Teil 2 — Dieses Repo (fedlex-mcp)
 
-### ruff: der Pin steht nur an einer Stelle — BEFUND
+### ruff: 0.16.1, an zwei Stellen
 
-`.github/workflows/ci.yml` installiert `ruff==0.16.1`.
-`.pre-commit-config.yaml` gibt es nicht.
-`pyproject.toml` `[dev]` hat nur eine Spanne: `ruff>=0.15.15,<0.17`.
+`pyproject.toml` `[dev]` und `.github/workflows/ci.yml` pinnen beide exakt
+`ruff==0.16.1`. `pip install -e ".[dev]"` liefert damit lokal dieselbe Version,
+die die CI fährt — die Gates sind ohne Zusatzschritt reproduzierbar.
 
-`pip install -e ".[dev]"` löst darin auf, was heute neu ist — nicht auf
-0.16.1. Wer die Gates so lokal fährt, lintet mit einer anderen Version als
-die CI. Deshalb vor dem Lint-Gate immer explizit:
-`pip install ruff==0.16.1`
+Die beiden Stellen halten dieselbe Zahl und müssen zusammen angefasst werden.
+Eine `.pre-commit-config.yaml` gibt es nicht; ein dritter Ort für dieselbe
+Version wäre ein dritter Ort zum Vergessen.
 
 ### Gate-Befehle, wörtlich aus `ci.yml`
 
