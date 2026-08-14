@@ -67,6 +67,11 @@ ruff format --check src/ tests/ scripts/
 
 Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Scan.
 
+CI-Status über die Checks-API lesen (`actions_list`, `list_workflow_runs`).
+Die Commit-Status-API (`get_status`) meldet hier immer `total_count: 0` — das
+Repo fährt reine Actions, und die melden nicht dorthin. Wer diese Null als
+«keine CI gelaufen» liest, erklärt einen grünen Lauf zum Ausfall.
+
 ### Live-Tests: geplanter Workflow vorhanden
 
 `.github/workflows/live-tests.yml`, `cron: "43 5 * * 1"` (wöchentlich Mo,
