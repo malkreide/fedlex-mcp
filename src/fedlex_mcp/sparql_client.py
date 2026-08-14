@@ -29,6 +29,12 @@ from typing import Any
 
 import httpx
 
+# Eigener Alias, damit Tests die Wartezeit nullen koennen, ohne `asyncio.sleep`
+# prozessweit zu entschaerfen. `monkeypatch.setattr(<modul>.asyncio, "sleep", ...)`
+# sieht lokal aus, ersetzt `sleep` aber auf dem geteilten Modulobjekt — fuer
+# httpx, respx, pytest-asyncio und jeden anderen Importeur im Prozess.
+_sleep = asyncio.sleep
+
 # Transiente HTTP-Status → Retry. 4xx (ausser 429) sind deterministisch.
 RETRYABLE_STATUS: frozenset[int] = frozenset({429, 502, 503, 504})
 DEFAULT_MAX_ATTEMPTS = 3
@@ -192,7 +198,7 @@ async def _request_with_retry(
                 break
             if on_retry is not None:
                 on_retry(attempt + 1, url, last_exc)
-            await asyncio.sleep(delay)
+            await _sleep(delay)
     assert last_exc is not None  # pragma: no cover - Schleife garantiert gesetzt
     raise last_exc
 

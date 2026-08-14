@@ -6,6 +6,7 @@ Retry-Kern, den SPARQL- und JSON-Requests teilen.
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
@@ -125,7 +126,7 @@ def fake_clock(monkeypatch):
         now["t"] += seconds
 
     monkeypatch.setattr(c.time, "monotonic", lambda: now["t"])
-    monkeypatch.setattr(c.asyncio, "sleep", _sleep)
+    monkeypatch.setattr(c, "_sleep", _sleep)
     return slept
 
 
@@ -217,3 +218,19 @@ async def test_a_slow_response_is_cut_by_the_wall_clock_deadline():
             await _call(http, total_budget=0.05)
     elapsed = real_time.monotonic() - started
     assert elapsed < 0.5, f"deadline did not cut: {elapsed:.2f}s"
+
+
+# --- Die Naht, und warum sie nicht `asyncio.sleep` ist -----------------------
+
+
+def test_der_retry_geht_ueber_den_alias():
+    """Sonst patchen die Tests eine Naht, die der Code gar nicht benutzt.
+
+    Umgeht das Modul den Alias, bleibt der Patch wirkungslos und die Suite
+    wartet die echte Backoff-Leiter ab. Kein Test faellt dabei — sie wird nur
+    um ein Vielfaches langsamer, und eine laengere Laufzeit ist kein Signal,
+    das jemand liest. Diese Zusicherung macht daraus einen Fehlschlag.
+    """
+    quelle = inspect.getsource(c)
+    assert "await _sleep(" in quelle, "der Retry ruft den Modul-Alias nicht mehr auf"
+    assert "await asyncio.sleep(" not in quelle, "der Retry umgeht den Alias"
