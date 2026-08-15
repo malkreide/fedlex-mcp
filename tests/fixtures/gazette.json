@@ -1,0 +1,6 @@
+
+{ "head": { "link": [], "vars": ["act", "title", "pubDate"] },
+  "results": { "distinct": false, "ordered": true, "bindings": [
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2165" }	, "title": { "type": "literal", "value": "Vollzug des Bundesgesetzes \u00FCber die Berufsbildung" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-14" }},
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2154" }	, "title": { "type": "literal", "value": "Vollzug des Bundesgesetzes \u00FCber die Berufsbildung" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-12" }},
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2137" }	, "title": { "type": "literal", "value": "Vollzug des Bundesgesetzes \u00FCber die Berufsbildung" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-11" }} ] } }

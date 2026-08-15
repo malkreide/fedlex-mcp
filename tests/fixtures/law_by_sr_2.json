@@ -1,0 +1,4 @@
+
+{ "head": { "link": [], "vars": ["ca", "title", "titleShort", "srNumber", "inForceStatus", "entryDate"] },
+  "results": { "distinct": false, "ordered": true, "bindings": [
+    { "ca": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/cc/2022/491" }	, "title": { "type": "literal", "value": "Bundesgesetz vom 25. September 2020 \u00FCber den Datenschutz (Datenschutzgesetz, DSG)" }	, "titleShort": { "type": "literal", "value": "DSG" }	, "entryDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2023-09-01" }} ] } }

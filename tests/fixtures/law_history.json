@@ -1,0 +1,4 @@
+
+{ "head": { "link": [], "vars": ["ca", "title", "srNumber", "entryDate", "inForceStatus"] },
+  "results": { "distinct": false, "ordered": true, "bindings": [
+    { "ca": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/cc/1993/1945_1945_1945" }	, "title": { "type": "literal", "value": "Bundesgesetz vom 19. Juni 1992 \u00FCber den Datenschutz (DSG)" }	, "srNumber": { "type": "literal", "value": "235.1" }	, "entryDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "1993-07-01" }	, "inForceStatus": { "type": "uri", "value": "https://fedlex.data.admin.ch/vocabulary/enforcement-status/3" }} ] } }
