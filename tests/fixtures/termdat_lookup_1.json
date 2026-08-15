@@ -1,0 +1,23 @@
+{
+  "head" : {
+    "vars" : [
+      "s",
+      "name"
+    ]
+  },
+  "results" : {
+    "bindings" : [
+      {
+        "s" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109/3/de"
+        },
+        "name" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "Volksschule"
+        }
+      }
+    ]
+  }
+}

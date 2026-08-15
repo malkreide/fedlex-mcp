@@ -1,0 +1,352 @@
+{
+  "head" : {
+    "vars" : [
+      "c",
+      "id",
+      "name",
+      "nl",
+      "desc",
+      "dl"
+    ]
+  },
+  "results" : {
+    "bindings" : [
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "obligatorische Schule"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "de"
+        },
+        "desc" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "Bildungsstufe, welche die Primarstufe und die Sekundarstufe I umfasst und im Normalfall eine Dauer von 11 Jahren umfasst, wobei die ersten Jahre der Primarstufe in Form eines zweijährigen Kindergartens oder einer Eingangsstufe organisiert sind."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "de"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "obligatorische Schule"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "de"
+        },
+        "desc" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "Degré de formation qui comprend le degré primaire et le degré secondaire I et qui  a une durée de 11 ans."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "fr"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "obligatorische Schule"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "de"
+        },
+        "desc" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "Grado di formazione che comprende il livello primario e il livello secondario I e ha una durata di 11 anni."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "it"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "scolarité obligatoire"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "fr"
+        },
+        "desc" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "Bildungsstufe, welche die Primarstufe und die Sekundarstufe I umfasst und im Normalfall eine Dauer von 11 Jahren umfasst, wobei die ersten Jahre der Primarstufe in Form eines zweijährigen Kindergartens oder einer Eingangsstufe organisiert sind."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "de"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "scolarité obligatoire"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "fr"
+        },
+        "desc" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "Degré de formation qui comprend le degré primaire et le degré secondaire I et qui  a une durée de 11 ans."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "fr"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "scolarité obligatoire"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "fr"
+        },
+        "desc" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "Grado di formazione che comprende il livello primario e il livello secondario I e ha una durata di 11 anni."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "it"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "scuola dell'obbligo"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "it"
+        },
+        "desc" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "Bildungsstufe, welche die Primarstufe und die Sekundarstufe I umfasst und im Normalfall eine Dauer von 11 Jahren umfasst, wobei die ersten Jahre der Primarstufe in Form eines zweijährigen Kindergartens oder einer Eingangsstufe organisiert sind."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "de"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "scuola dell'obbligo"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "it"
+        },
+        "desc" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "Degré de formation qui comprend le degré primaire et le degré secondaire I et qui  a une durée de 11 ans."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "fr"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "scuola dell'obbligo"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "it"
+        },
+        "desc" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "Grado di formazione che comprende il livello primario e il livello secondario I e ha una durata di 11 anni."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "it"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "en",
+          "type" : "literal",
+          "value" : "compulsory education"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "en"
+        },
+        "desc" : {
+          "xml:lang" : "de",
+          "type" : "literal",
+          "value" : "Bildungsstufe, welche die Primarstufe und die Sekundarstufe I umfasst und im Normalfall eine Dauer von 11 Jahren umfasst, wobei die ersten Jahre der Primarstufe in Form eines zweijährigen Kindergartens oder einer Eingangsstufe organisiert sind."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "de"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "en",
+          "type" : "literal",
+          "value" : "compulsory education"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "en"
+        },
+        "desc" : {
+          "xml:lang" : "fr",
+          "type" : "literal",
+          "value" : "Degré de formation qui comprend le degré primaire et le degré secondaire I et qui  a une durée de 11 ans."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "fr"
+        }
+      },
+      {
+        "c" : {
+          "type" : "uri",
+          "value" : "https://register.ld.admin.ch/termdat/40109"
+        },
+        "id" : {
+          "type" : "literal",
+          "value" : "40109"
+        },
+        "name" : {
+          "xml:lang" : "en",
+          "type" : "literal",
+          "value" : "compulsory education"
+        },
+        "nl" : {
+          "type" : "literal",
+          "value" : "en"
+        },
+        "desc" : {
+          "xml:lang" : "it",
+          "type" : "literal",
+          "value" : "Grado di formazione che comprende il livello primario e il livello secondario I e ha una durata di 11 anni."
+        },
+        "dl" : {
+          "type" : "literal",
+          "value" : "it"
+        }
+      }
+    ]
+  }
+}

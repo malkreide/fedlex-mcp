@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Eine aufgezeichnete Antwort je Abfrage**, in `tests/fixtures/`, mit
+  Herkunft, Aufnahmedatum, Werkzeug, Endpunkt, Eingabe und SHA-256 je Datei in
+  `tests/fixtures/PROVENANCE.md`. Neu aufzeichnen mit
+  `PYTHONPATH=src python scripts/record_fixtures.py`, geladen über
+  `tests/fixture_data.py`.
+
+  **Je Abfrage, nicht je Endpunkt.** Dieser Server hat zwei Endpunkte (Fedlex
+  und LINDAS/TERMDAT) und ein Dutzend Abfrageformen. Die Portfolio-Regel «eine
+  Antwort je externem Endpunkt» wäre mit zwei Dateien erfüllt und trüge fast
+  nichts — `get_law_history` liefert andere Variablen als `search_treaties`.
+  Elf Aufzeichnungen für neun Werkzeuge; `get_law_by_sr` und `termdat_lookup`
+  schicken je zwei Abfragen und bekommen je zwei Dateien.
+
+  **Aufgezeichnet an der Naht, an der der Server die Antwort erhält.** Der
+  Recorder fährt die Werkzeuge selbst und schneidet die SPARQL-Schicht über
+  einen Antwort-Hook mit. Die Fixture ist damit per Konstruktion die Antwort
+  auf die Abfrage, die der Server wirklich stellt — eine von Hand nachgebaute
+  Abfrage wäre schon wieder eine Annahme. Die erste Fassung des Recorders
+  stellte die Abfrage selbst noch einmal und bekam kein JSON zurück: ihr fehlte
+  der `Accept`-Header des Clients. Genau die Sorte Abweichung, wegen der
+  aufgezeichnet statt nachgebaut wird.
+
+  `get_law_by_sr` und `get_law_history` fragen **dasselbe** Gesetz ab (SR
+  235.1), damit die beiden Aufzeichnungen einen Gegenstand beschreiben und
+  nicht zwei.
+- **`test_termdat_geht_an_den_anderen_endpunkt`** liest die tatsächlich
+  gestellte Anfrage: ginge die Terminologie-Abfrage an den Fedlex-Endpunkt
+  statt an LINDAS, käme sie leer zurück und sähe wie ein Negativtreffer aus.
+- **Der Recorder räumt Altlasten weg.** Ändert ein Werkzeug die Zahl seiner
+  Abfragen, heisst die Datei anders (`law_by_sr.json` wird zu
+  `law_by_sr_1.json`) — die alte bliebe sonst liegen und sähe aus wie eine
+  gültige Aufzeichnung. Beim ersten Lauf ist genau das passiert;
+  `test_jede_fixture_steht_in_der_provenance` merkt es.
+
 ### Changed
 
 - **Der Backoff-Schlaf wird ueber einen Modul-Alias gepatcht, nicht ueber

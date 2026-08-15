@@ -1,0 +1,6 @@
+
+{ "head": { "link": [], "vars": ["act", "title", "pubDate"] },
+  "results": { "distinct": false, "ordered": true, "bindings": [
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2163" }	, "title": { "type": "literal", "value": "Eidgen\u00F6ssische Volksinitiative \u00ABJa zum Schutz vor missbr\u00E4uchlichen Mieten (Mietpreis-Initiative)\u00BB. Zustandekommen" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-14" }},
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2164" }	, "title": { "type": "literal", "value": "Mitteilung des Bundesamtes f\u00FCr Lebensmittelsicherheit und Veterin\u00E4rwesen" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-14" }},
+    { "act": { "type": "uri", "value": "https://fedlex.data.admin.ch/eli/fga/2026/2165" }	, "title": { "type": "literal", "value": "Vollzug des Bundesgesetzes \u00FCber die Berufsbildung" }	, "pubDate": { "type": "typed-literal", "datatype": "http://www.w3.org/2001/XMLSchema#date", "value": "2026-08-14" }} ] } }
