@@ -50,8 +50,11 @@ dev = [
     # eine Zeile Code geändert hat. Schlimmer noch lokal — wer die Gates von Hand
     # fährt, lintet sonst mit einer anderen Version als die CI und jagt
     # Abweichungen, die niemand verursacht hat.
-    # Muss mit dem `pip install ruff==...` in `.github/workflows/ci.yml`
-    # übereinstimmen; beide Stellen zusammen anfassen.
+    # Der Pin steht hier und nur hier. `.github/workflows/ci.yml` hatte
+    # zusätzlich ein `pip install ruff==...`; zwei Stellen für dieselbe Version
+    # driften auseinander, und die CI merkt es nicht, weil der zweite Schritt
+    # den ersten überschreibt. Beim Anheben: Version ändern, `ruff format`
+    # einmal über src/ tests/ scripts/ laufen lassen, Ergebnis mitcommitten.
     "ruff==0.16.1",
 ]
 # Optional OpenTelemetry tracing (OBS-006). Enabled at runtime only when

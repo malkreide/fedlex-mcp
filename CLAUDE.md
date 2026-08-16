@@ -45,22 +45,24 @@ Ein Codex-Review auf einem PR wird beantwortet oder behoben, nie ignoriert.
 
 ## Teil 2 — Dieses Repo (fedlex-mcp)
 
-### ruff: 0.16.1, an zwei Stellen
+### ruff: 0.16.1, eine Stelle
 
-`pyproject.toml` `[dev]` und `.github/workflows/ci.yml` pinnen beide exakt
-`ruff==0.16.1`. `pip install -e ".[dev]"` liefert damit lokal dieselbe Version,
-die die CI fährt — die Gates sind ohne Zusatzschritt reproduzierbar.
+`pyproject.toml` `[dev]` pinnt exakt `ruff==0.16.1`, und nur dort.
+`pip install -e ".[dev]"` liefert damit lokal dieselbe Version, die die CI
+fährt — die Gates sind ohne Zusatzschritt reproduzierbar.
 
-Die beiden Stellen halten dieselbe Zahl und müssen zusammen angefasst werden.
-Eine `.pre-commit-config.yaml` gibt es nicht; ein dritter Ort für dieselbe
-Version wäre ein dritter Ort zum Vergessen.
+`ci.yml` hatte zusätzlich ein `pip install ruff==0.16.1` nach dem Install. Die
+Zahlen stimmten überein, aber die Konstruktion konnte das nicht sicherstellen:
+Der zweite Schritt überschrieb den ersten, also wäre ein `>=` im `dev`-Extra
+in der CI nie aufgefallen und hätte nur lokal wehgetan. Ein dritter Ort für
+dieselbe Version wäre ein dritter Ort zum Vergessen — eine
+`.pre-commit-config.yaml` gibt es bewusst nicht.
 
 ### Gate-Befehle, wörtlich aus `ci.yml`
 
 ```
 pip install -e ".[dev]"
 PYTHONPATH=src pytest tests/ -m "not live"
-pip install ruff==0.16.1
 ruff check src/ tests/ scripts/
 ruff format --check src/ tests/ scripts/
 ```
