@@ -82,6 +82,23 @@ ruff format --check src/ tests/ scripts/
 ```
 
 Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Scan.
+Alle Gates laufen auf allen drei Versionen, keine `if:`-Ausnahme; ein
+`fail-fast: false` steht nicht da.
+
+**Der SEC-022-Schutz steht nicht in dieser Liste, und das ist Absicht.** Er
+liegt in `tests/test_server.py::test_tool_definitions_match_lock`, läuft also
+im `pytest` mit und vergleicht die Tool-Definitionen gegen
+`tool-definitions.lock.json`. Die Schwester-Server fahren dafür einen eigenen
+CI-Schritt (`--check`); wer die Gate-Liste hier danach absucht, findet nichts
+und schliesst falsch, der Schutz fehle. Nach einer beabsichtigten Änderung
+`PYTHONPATH=src python scripts/snapshot_tools.py` und die Lock-Datei
+mitcommitten.
+
+**Es gibt kein Versions-Sync-Gate.** `scripts/` enthält
+`classify_live_run.py`, `record_fixtures.py` und `snapshot_tools.py` — kein
+`check_version_sync.py`, und kein Workflow ruft eines auf. `pyproject.toml`
+und `server.json` stehen beide auf `2.0.1`, gehalten wird das von nichts.
+Beim Anheben also beide Stellen von Hand.
 
 CI-Status über die Checks-API lesen (`actions_list`, `list_workflow_runs`).
 Die Commit-Status-API (`get_status`) meldet hier immer `total_count: 0` — das
