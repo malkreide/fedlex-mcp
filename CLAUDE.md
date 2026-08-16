@@ -72,6 +72,9 @@ in der CI nie aufgefallen und hätte nur lokal wehgetan. Ein dritter Ort für
 dieselbe Version wäre ein dritter Ort zum Vergessen — eine
 `.pre-commit-config.yaml` gibt es bewusst nicht.
 
+Vor dem Lauf `ruff --version` prüfen: ein älteres ruff früher im `PATH`
+schlägt den Pin, ohne dass der Install etwas meldet.
+
 ### Gate-Befehle, wörtlich aus `ci.yml`
 
 ```
