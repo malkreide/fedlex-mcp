@@ -138,9 +138,9 @@ wie der Code: Nichts ist rot, weil nichts geprüft wird, worauf es ankommt.
 
 ## Teil 2 — Dieses Repo (fedlex-mcp)
 
-### ruff: 0.16.1, eine Stelle
+### ruff: 0.16.3, eine Stelle
 
-`pyproject.toml` `[dev]` pinnt exakt `ruff==0.16.1`, und nur dort.
+`pyproject.toml` `[dev]` pinnt exakt `ruff==0.16.3`, und nur dort.
 `pip install -e ".[dev]"` liefert damit lokal dieselbe Version, die die CI
 fährt — die Gates sind ohne Zusatzschritt reproduzierbar.
 
