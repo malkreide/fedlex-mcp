@@ -485,12 +485,25 @@ write-capable tool is added.
 
 ## MCP Protocol Version
 
-The protocol version is negotiated at the `initialize` handshake by the
-[`mcp`](https://pypi.org/project/mcp/) Python SDK; the supported range is
-declared in `pyproject.toml` (repeating it here only lets it go stale). The SDK
-is kept current via monthly Dependabot PRs
-(`.github/dependabot.yml`); protocol-relevant bumps are noted in
+The protocol version rides on every request — spec `2026-07-28` removed the
+`initialize` handshake and the session it opened, so there is nothing left to
+negotiate once and remember. The [`mcp`](https://pypi.org/project/mcp/) Python
+SDK handles that; the supported range is declared in `pyproject.toml` (repeating
+it here only lets it go stale). The SDK is kept current via monthly Dependabot
+PRs (`.github/dependabot.yml`); protocol-relevant bumps are noted in
 [`CHANGELOG.md`](CHANGELOG.md).
+
+Two consequences of that revision are visible in this server:
+
+- **CORS names the routing headers.** `Mcp-Method`, `Mcp-Name` and
+  `Mcp-Protocol-Version` ride on every streamable-HTTP request, and a browser
+  may only send a header the server allow-lists. See `CORS_ROUTING_HEADERS` in
+  `server.py`.
+- **The listing methods carry a freshness hint.** `tools/list`,
+  `resources/list`, `resources/templates/list` and `server/discover` answer with
+  `ttlMs` 300000 and `cacheScope` `public` (`CACHE_HINTS`). `resources/read`
+  deliberately does not: it returns federal law, and a client must not treat a
+  repealed enactment as fresh for five minutes.
 
 ---
 
