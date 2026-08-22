@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Browser-Clients kamen am Preflight nicht vorbei.** Spec `2026-07-28` routet
+  eine Streamable-HTTP-Anfrage ueber `Mcp-Method`, `Mcp-Name` und
+  `Mcp-Protocol-Version`; die CORS-Freigabeliste nannte `Content-Type` und
+  `Mcp-Session-Id` — den Header genau der Session-Mechanik, die dieselbe Spec
+  abgeschafft hat. Ein Browser darf einen nicht safelisteten Header nicht
+  senden, wenn der Server ihn nicht nennt: der Preflight endete mit 400, vor
+  dem ersten MCP-Byte. stdio- und Python-Clients kennen keinen Preflight und
+  liefen weiter, deshalb war nichts rot. `tests/test_cors.py` faehrt jeden
+  Header einzeln gegen die zusammengebaute App und haelt die Liste zusaetzlich
+  gegen die Konstanten aus `mcp.shared.inbound`.
+
+- **Der Protokoll-Abschnitt der README beschrieb einen abgeschafften
+  Handshake.** «negotiated at the `initialize` handshake» galt bis
+  `2025-11-25`; seit `2026-07-28` traegt jede Anfrage die Version selbst.
+
 ### Added
+
+- **Frischehinweise auf den auflistenden Methoden** (SEP-2549, Spec
+  `2026-07-28`): `tools/list`, `resources/list`, `resources/templates/list` und
+  `server/discover` antworten mit `ttlMs` 300000 und `cacheScope` `public`. Das
+  SDK setzt sonst «sofort veraltet, nie geteilt», was jeden Client bei jeder
+  Verbindung neu auflisten laesst — fuer Listen, die per Dekorator beim Import
+  feststehen und nicht vom Aufrufer abhaengen.
+
+  `resources/read` bleibt bewusst ohne Hinweis: `fedlex://sr/{sr_number}`
+  liefert geltendes Bundesrecht, und ein Client, der das fuenf Minuten als
+  frisch behandelt, zeigt womoeglich einen aufgehobenen Erlass.
+  `test_der_inhalt_einer_ressource_traegt_keinen_frischehinweis` faellt, wenn
+  jemand die Methode doch aufnimmt.
 
 - **Die Pruefsummen im Fixture-Nachweis waren Zierde.** `PROVENANCE.md` fuehrt
   je Datei einen SHA-256 — um genau einen Fall zu fangen: eine Aufzeichnung,

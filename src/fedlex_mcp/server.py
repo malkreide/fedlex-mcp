@@ -50,6 +50,7 @@ from typing import Any, Literal
 
 import httpx
 import structlog
+from mcp.server.caching import CacheHint
 from mcp.server.mcpserver import Context, MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -542,8 +543,34 @@ def no_match_hint(tips: str) -> str:
 # Server-Initialisierung
 # ---------------------------------------------------------------------------
 
+# SEP-2549, Spec 2026-07-28: die auflistenden Methoden tragen `ttlMs` und
+# `cacheScope`. Das SDK setzt beides auf «sofort veraltet, nie geteilt», ein
+# Server ohne `cache_hints` laesst also jeden Client bei jeder Verbindung neu
+# auflisten — fuer Listen, die beim Import feststehen und sich zur Laufzeit des
+# Prozesses nicht aendern koennen.
+#
+# `public`, weil die Antwort nicht vom Aufrufer abhaengt: die zwoelf Tools und
+# die beiden Ressourcen werden per Dekorator beim Import registriert, es gibt
+# keine Filterung nach Identitaet und dieser Server kennt ohnehin nur einen
+# statischen Zugang.
+#
+# `resources/read` steht bewusst NICHT hier. `fedlex://sr/{sr_number}` liefert
+# geltendes Bundesrecht aus dem SPARQL-Endpoint der Bundeskanzlei; ein Client,
+# der die Antwort fuenf Minuten als frisch behandelt, zeigt unter Umstaenden
+# einen aufgehobenen Erlass. Die auflistenden Methoden sagen, WELCHE Ressourcen
+# es gibt, und das ist die statische Angabe — nicht ihr Inhalt.
+LIST_CACHE_TTL_MS = 300_000
+
+CACHE_HINTS = {
+    "tools/list": CacheHint(ttl_ms=LIST_CACHE_TTL_MS, scope="public"),
+    "resources/list": CacheHint(ttl_ms=LIST_CACHE_TTL_MS, scope="public"),
+    "resources/templates/list": CacheHint(ttl_ms=LIST_CACHE_TTL_MS, scope="public"),
+    "server/discover": CacheHint(ttl_ms=LIST_CACHE_TTL_MS, scope="public"),
+}
+
 mcp = MCPServer(
     "fedlex_mcp",
+    cache_hints=CACHE_HINTS,
     instructions=(
         "MCP-Server für das Schweizer Bundesrecht (Fedlex). "
         "Zugriff auf die Systematische Rechtssammlung (SR), "
@@ -2335,11 +2362,25 @@ def build_transport_security(host: str, port: int):
     )
 
 
+# Die Header, nach denen Spec 2026-07-28 eine Streamable-HTTP-Anfrage routet —
+# in der Schreibweise des SDK (`mcp.shared.inbound`). Ein Browser darf einen
+# nicht safelisteten Header gar nicht erst senden, wenn der Server ihn nicht in
+# `Access-Control-Allow-Headers` nennt: ohne sie stirbt jede Cross-Origin-
+# Anfrage am Preflight, vor dem ersten MCP-Byte. stdio- und Python-Clients
+# kennen keinen Preflight und merken davon nichts — deshalb fiel es nicht auf.
+#
+# `Mcp-Param-*` fehlt bewusst: CORS kennt keinen Praefix-Wildcard, und kein
+# Tool-Schema dieses Servers traegt eine `x-mcp-header`-Annotation.
+CORS_ROUTING_HEADERS = ["Mcp-Method", "Mcp-Name", "Mcp-Protocol-Version"]
+
+
 def build_http_app(host: str = "127.0.0.1", port: int = 8000):
     """Baut die Streamable-HTTP-App mit CORS (SDK-004).
 
-    CORS exponiert den `Mcp-Session-Id`-Header, ohne den Browser-basierte
-    MCP-Clients keine Folge-Requests an dieselbe Session schicken können.
+    Die Freigabeliste nennt die Routing-Header der Spec 2026-07-28; ohne sie
+    weist der Preflight jede Cross-Origin-Anfrage mit 400 ab. `Mcp-Session-Id`
+    bleibt gelistet, solange Clients mit aelteren Sessions gegen diesen Server
+    laufen — die Spec hat Sessions auf Protokollebene abgeschafft.
 
     ``host`` muss die Adresse sein, an die uvicorn tatsächlich bindet — siehe
     :func:`build_transport_security`.
@@ -2362,7 +2403,7 @@ def build_http_app(host: str = "127.0.0.1", port: int = 8000):
         CORSMiddleware,
         allow_origins=origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "Mcp-Session-Id"],
+        allow_headers=["Content-Type", *CORS_ROUTING_HEADERS, "Mcp-Session-Id"],
         expose_headers=["Mcp-Session-Id"],
     )
     return app
