@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Handshake.** «negotiated at the `initialize` handshake» galt bis
   `2025-11-25`; seit `2026-07-28` traegt jede Anfrage die Version selbst.
 
+- **Die README behauptete, `2026-07-28` habe den `initialize`-Handshake
+  entfernt.** «Es gibt nichts mehr, das einmal ausgehandelt und gemerkt wird» —
+  gemessen stimmt das nicht: `mcp` 2.x bedient beide Aeren, und ein Legacy-
+  `initialize` gegen diesen Server bekommt `2025-11-25` zurueck. Der Abschnitt
+  beschreibt jetzt beide Aeren, und ein Test haelt die Zahlen gegen das SDK.
+
 ### Added
 
 - **Frischehinweise auf den auflistenden Methoden** (SEP-2549, Spec
@@ -80,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `law_by_sr_1.json`) — die alte bliebe sonst liegen und sähe aus wie eine
   gültige Aufzeichnung. Beim ersten Lauf ist genau das passiert;
   `test_jede_fixture_steht_in_der_provenance` merkt es.
+
+- **Protokoll-Gate: beide Spec-Aeren gepinnt und geprueft**
+  (`tests/test_protocol_version.py`). `mcp` 2.x bedient zwei Aeren ueber
+  denselben Server — den `initialize`-Handshake, der bei `2025-11-25`
+  deckelt, und den Pro-Request-Envelope, der `2026-07-28` erreicht.
+  `LATEST_PROTOCOL_VERSION` ist ein Alias auf die **moderne** Aera; wer nur
+  dagegen pinnt, laesst genau die Aera frei wandern, die heutige Clients
+  aushandeln. Beide sind jetzt einzeln gepinnt, ein Dependabot-Bump von
+  `mcp` kann keine davon still verschieben.
+
+  Nachgemessen statt aus Konstantennamen geschlossen: ein echter `initialize`
+  durch den zusammengebauten ASGI-Stack. Ein Client, der ueber den Handshake
+  nach `2026-07-28` fragt, bekommt `2025-11-25` zurueck.
+
+  Beide READMEs beschreiben die Aeren; ein Test haelt jede Sprache einzeln
+  dagegen — im Portfolio sind EN und DE desselben Repos schon dreimal
+  auseinandergelaufen, weil nur eine Fassung nachgezogen wurde.
 
 ### Changed
 
