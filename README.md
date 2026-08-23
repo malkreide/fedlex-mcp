@@ -485,15 +485,31 @@ write-capable tool is added.
 
 ## MCP Protocol Version
 
-The protocol version rides on every request — spec `2026-07-28` removed the
-`initialize` handshake and the session it opened, so there is nothing left to
-negotiate once and remember. The [`mcp`](https://pypi.org/project/mcp/) Python
-SDK handles that; the supported range is declared in `pyproject.toml` (repeating
-it here only lets it go stale). The SDK is kept current via monthly Dependabot
-PRs (`.github/dependabot.yml`); protocol-relevant bumps are noted in
-[`CHANGELOG.md`](CHANGELOG.md).
+This server speaks **two protocol eras** over the same endpoint. The client's
+first request on a connection decides which one applies; a later claim from the
+other era is refused.
 
-Two consequences of that revision are visible in this server:
+| Era | Revision | Who reaches it |
+|---|---|---|
+| `initialize` handshake | `2024-11-05` … **`2025-11-25`** | What today's clients speak. The server answers with the revision asked for, or with the `2025-11-25` ceiling when the request asks for something newer. |
+| Per-request envelope | **`2026-07-28`** | A request carrying the `2026-07-28` `_meta` envelope opens a modern connection. |
+
+Both revisions are pinned in
+[`tests/test_protocol_version.py`](tests/test_protocol_version.py) and asserted
+against the installed SDK, so a Dependabot bump of `mcp` cannot move either one
+silently. The handshake ceiling is measured against a live `initialize` through
+the assembled ASGI stack, not read off a constant name.
+
+Note that the SDK's `LATEST_PROTOCOL_VERSION` is an alias for the **modern**
+era, not for the handshake era — pinning against it alone would leave the era
+that current clients actually negotiate free to drift.
+
+**Update policy.** When the gate fails, do not edit the constant blindly: read
+the spec changelog between the two revisions, verify the server still behaves,
+then move the constant, this section, `README.de.md` and
+[`CHANGELOG.md`](CHANGELOG.md) together.
+
+Two consequences of the modern revision are visible in this server:
 
 - **CORS names the routing headers.** `Mcp-Method`, `Mcp-Name` and
   `Mcp-Protocol-Version` ride on every streamable-HTTP request, and a browser
