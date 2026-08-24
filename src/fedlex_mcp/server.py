@@ -2374,6 +2374,18 @@ def build_transport_security(host: str, port: int):
 CORS_ROUTING_HEADERS = ["Mcp-Method", "Mcp-Name", "Mcp-Protocol-Version"]
 
 
+# `DELETE` beendet auf streamable-http eine Session ausdruecklich. Es fehlte
+# hier, und der Preflight wies die Methode mit 400 ab — ein Browser-Client
+# konnte Sessions oeffnen, aber nie schliessen; sie liefen erst am Timeout aus.
+# Das SDK bedient sie sehr wohl: `_handle_delete_request` in
+# `mcp.server.streamable_http`, und dessen eigene 405-Antwort wirbt mit
+# `Allow: GET, POST, DELETE`. Die Freigabeliste war schmaler als der Server.
+#
+# `OPTIONS` bleibt gelistet, obwohl Starlette den Preflight selbst beantwortet:
+# so nennt die Liste vollstaendig, was am Endpunkt zulaessig ist.
+CORS_ALLOW_METHODS = ["GET", "POST", "DELETE", "OPTIONS"]
+
+
 def build_http_app(host: str = "127.0.0.1", port: int = 8000):
     """Baut die Streamable-HTTP-App mit CORS (SDK-004).
 
@@ -2402,7 +2414,7 @@ def build_http_app(host: str = "127.0.0.1", port: int = 8000):
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=CORS_ALLOW_METHODS,
         allow_headers=["Content-Type", *CORS_ROUTING_HEADERS, "Mcp-Session-Id"],
         expose_headers=["Mcp-Session-Id"],
     )
