@@ -111,6 +111,35 @@ jobs:
 
             let last = { state: 'pending', reason: 'Lauf gestartet' };
             let sha = null;
+            // SHA -> Zeitpunkt, zu dem wir ihn erstmals als PR-Head gesehen
+            // haben. Quelle ist der erste eigene `codex-gate`-Status auf diesem
+            // Commit; gesetzt hat ihn der Lauf, den der Push ausgeloest hat.
+            // Das Committer-Datum taugt dafuer nicht — es sagt, wann jemand
+            // committet hat, nicht wann der Commit Head wurde (Codex-Review vom
+            // 28.8.2026, P1).
+            const seenCache = new Map();
+
+            const headSeenAt = async (commit) => {
+              if (seenCache.has(commit)) return seenCache.get(commit);
+              const all = await github.paginate(
+                github.rest.repos.listCommitStatusesForRef,
+                { ...context.repo, ref: commit, per_page: 100 },
+              );
+              const ours = all
+                .filter((s) => s.context === 'codex-gate')
+                .map((s) => s.created_at)
+                .sort();
+              let seen = ours[0];
+              if (!seen) {
+                // Erster Lauf auf diesem Head: Der Status, den wir jetzt setzen,
+                // IST die Beobachtung. Er kommt bewusst vor dem Pollen, damit
+                // das Gate nicht erst am Ende des Laufs sichtbar wird.
+                seen = new Date().toISOString();
+                await setStatus(commit, 'pending', 'Head gesehen, warte auf Codex');
+              }
+              seenCache.set(commit, seen);
+              return seen;
+            };
 
             while (true) {
               const { data: pr } = await github.rest.pulls.get({
@@ -135,6 +164,7 @@ jobs:
                 draft: pr.draft,
                 head_sha: sha,
                 head_committed_at: headCommit.commit.committer.date,
+                head_seen_at: await headSeenAt(sha),
                 reviews: reviews.map((r) => ({
                   user: { login: r.user?.login }, commit_id: r.commit_id, state: r.state,
                 })),
