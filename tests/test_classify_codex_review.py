@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from classify_codex_review import (  # noqa: E402
     BLOCKED,
+    COMMIT_STATUS,
     DRAFT,
     PENDING,
     REVIEWED,
@@ -243,3 +244,76 @@ def test_cli_endet_immer_mit_null(tmp_path):
     )
     assert out.returncode == 0
     assert "state=draft" in out.stdout
+
+
+# --- Welcher Commit-Status zu welchem Befund gehoert --------------------------
+#
+# Diese Abbildung entscheidet, was ein Mensch im PR sieht, und ist damit eine
+# Behauptung — deshalb steht sie im Skript und nicht im YAML.
+
+
+def test_nur_reviewed_wird_gruen():
+    assert COMMIT_STATUS[REVIEWED] == "success"
+    for state in (PENDING, DRAFT, BLOCKED):
+        assert COMMIT_STATUS[state] != "success"
+
+
+def test_draft_ist_pending_und_nicht_rot():
+    """Gemessen am 28.8.2026 an diesem Gate selbst.
+
+    Seine ersten beiden Laeufe faerbten zwei frische Draft-PRs rot (#101, #64)
+    und loesten je ein CI-Fehler-Signal aus — obwohl beide PRs genau so waren,
+    wie sie sein sollten. Ein Draft ist ohnehin nicht mergebar; «rot» behauptet
+    dort einen Defekt, den es nicht gibt, und ein Repo, in dem jeder Draft ein
+    rotes Kreuz traegt, bringt seinen Leuten bei, rote Kreuze zu uebersehen.
+    `pending` haelt den Merge genauso auf.
+    """
+    assert COMMIT_STATUS[DRAFT] == "pending"
+
+
+def test_blocked_ist_rot_und_nicht_bloss_pending():
+    """Gegenstueck zum Test darueber, damit «pending» nicht zur Ausrede wird.
+
+    Erschoepftes Kontingent und fehlende Environment sind kein Wartezustand:
+    Ohne Handlung aendert sich daran nichts, also darf es auch nicht so
+    aussehen, als warte da jemand.
+    """
+    assert COMMIT_STATUS[BLOCKED] == "failure"
+
+
+def test_jeder_zustand_hat_einen_status():
+    """Ein fehlender Schluessel wuerde erst im Workflow auffallen — mit einem
+    KeyError, der den Status gar nicht erst setzt."""
+    assert set(COMMIT_STATUS) == {REVIEWED, PENDING, DRAFT, BLOCKED}
+    assert set(COMMIT_STATUS.values()) <= {"success", "pending", "failure", "error"}
+
+
+def test_cli_gibt_den_status_mit_aus(tmp_path):
+    """Der Workflow liest `status=` aus der Ausgabe — fehlt sie, faellt er auf
+    `pending` zurueck und ein gruener Lauf wuerde nie gruen."""
+    payload = tmp_path / "p.json"
+    payload.write_text(
+        json.dumps(_payload(reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED"}])),
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        [sys.executable, str(SCRIPT), "--payload", str(payload)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "state=reviewed" in out.stdout
+    assert "status=success" in out.stdout
+
+
+def test_cli_gibt_fuer_draft_pending_aus(tmp_path):
+    payload = tmp_path / "p.json"
+    payload.write_text(json.dumps(_payload(draft=True)), encoding="utf-8")
+    out = subprocess.run(
+        [sys.executable, str(SCRIPT), "--payload", str(payload)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "state=draft" in out.stdout
+    assert "status=pending" in out.stdout

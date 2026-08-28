@@ -256,8 +256,11 @@ Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Sca
 einen Commit-Status `codex-gate` auf den PR-Head und wird nur grün, wenn Codex
 diesen Head nachweislich geprüft hat — Review-Objekt ODER Befundlos-Meldung.
 Kontingent- und Environment-Meldung lassen es **rot**: Beide heissen
-ausdrücklich «nicht geprüft». Ein Draft ebenfalls, weil Codex dort nicht
-anläuft.
+ausdrücklich «nicht geprüft», und ohne Handlung ändert sich daran nichts. Ein
+Draft steht auf **gelb** — er ist ohnehin nicht mergebar, und ein Repo, in dem
+jeder Draft ein rotes Kreuz trägt, bringt seinen Leuten bei, rote Kreuze zu
+übersehen. Das Gate hat sich diese Lektion selbst erteilt: Seine ersten beiden
+Läufe färbten zwei frische Draft-PRs rot.
 
 Bewusst kein Timer. Ein Gate, das nach N Minuten von selbst grün wird,
 behauptet eine Prüfung, die es nicht gesehen hat — am 21./22.8. war das

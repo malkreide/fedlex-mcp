@@ -18,8 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Der neue Workflow setzt einen Commit-Status `codex-gate` auf den PR-Head und
   wird nur grün, wenn Codex diesen Head nachweislich geprüft hat: Review-Objekt
-  ODER Befundlos-Meldung. Kontingent- und Environment-Meldung lassen ihn rot,
-  ein Draft ebenfalls.
+  ODER Befundlos-Meldung. Kontingent- und Environment-Meldung lassen ihn rot —
+  beide heissen ausdrücklich «nicht geprüft». Ein Draft steht auf gelb: Er ist
+  ohnehin nicht mergebar, und rot behauptet dort einen Defekt, den es nicht
+  gibt. Diese Unterscheidung stammt aus dem Gate selbst — seine ersten beiden
+  Läufe färbten zwei frische Draft-PRs rot und lösten je ein CI-Fehler-Signal
+  aus.
 
   Bewusst **kein Timer**: Ein Gate, das nach N Minuten von selbst grün wird,
   behauptet eine Prüfung, die es nicht gesehen hat — am 21./22.8. war das

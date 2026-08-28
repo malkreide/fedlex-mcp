@@ -148,23 +148,26 @@ jobs:
                 'scripts/classify_codex_review.py', '--payload', 'codex-payload.json',
               ], { encoding: 'utf-8' });
               const state = /^state=(.*)$/m.exec(out)?.[1] ?? 'pending';
+              const status = /^status=(.*)$/m.exec(out)?.[1] ?? 'pending';
               const reason = /^reason=(.*)$/m.exec(out)?.[1] ?? '';
               last = { state, reason };
-              core.info(`${state}: ${reason}`);
+              core.info(`${state} -> ${status}: ${reason}`);
 
-              if (state === 'reviewed') {
-                await setStatus(sha, 'success', reason);
-                break;
-              }
-              // `blocked` und `draft` aendern sich nicht durchs Warten — sie
-              // brauchen eine Handlung, kein Pollen.
-              if (state === 'blocked' || state === 'draft') {
-                await setStatus(sha, 'failure', reason);
-                break;
-              }
-              await setStatus(sha, 'pending', reason);
+              // Welcher Status zu welchem Befund gehoert, entscheidet das
+              // Skript (COMMIT_STATUS) — dort steht es neben seinem Test.
+              await setStatus(sha, status, reason);
+
+              // `reviewed`, `blocked` und `draft` aendern sich nicht durchs
+              // Warten: Der erste ist fertig, die beiden anderen brauchen eine
+              // Handlung. Nur `pending` ist ein Zustand, aus dem Pollen
+              // herausfuehrt.
+              if (state !== 'pending') break;
               if (Date.now() + stepMs > deadline) {
-                await setStatus(sha, 'failure',
+                // Bleibt `pending`, nicht `failure`: Dass dieser Lauf sein
+                // Zeitfenster ausgeschoepft hat, sagt nichts darueber, ob
+                // Codex noch antwortet — der `issue_comment`-Trigger zieht den
+                // Status nach. Der Merge bleibt so oder so blockiert.
+                await setStatus(sha, 'pending',
                   `${reason} — Zeitfenster dieses Laufs abgelaufen`);
                 break;
               }

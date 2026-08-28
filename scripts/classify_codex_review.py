@@ -81,6 +81,29 @@ PENDING = "pending"
 BLOCKED = "blocked"
 DRAFT = "draft"
 
+# Welcher Commit-Status zu welchem Befund gehoert. Die Abbildung steht hier und
+# nicht im YAML, weil sie eine Behauptung ist: Sie entscheidet, was ein Mensch
+# im PR sieht.
+#
+# `draft` ist bewusst `pending` und nicht `failure`. Ein Draft ist ohnehin nicht
+# mergebar — es gibt nichts aufzuhalten, und «rot» behauptet einen Defekt, den
+# es nicht gibt. Gemessen am 28.8.2026 an diesem Gate selbst: Seine ersten
+# beiden Laeufe faerbten zwei frische Draft-PRs rot und loesten je ein
+# CI-Fehler-Signal aus, obwohl beide genau so waren, wie sie sein sollten. Ein
+# Repo, in dem jeder Draft ein rotes Kreuz traegt, bringt seinen Leuten bei,
+# rote Kreuze zu uebersehen — und das ist teurer als der Hinweis wert ist.
+# `pending` haelt den Merge genauso auf und behauptet dabei nur, was stimmt:
+# noch nicht entschieden.
+#
+# `blocked` bleibt `failure`: Erschoepftes Kontingent und fehlende Environment
+# sind kein Wartezustand, sondern brauchen eine Handlung.
+COMMIT_STATUS = {
+    REVIEWED: "success",
+    PENDING: "pending",
+    DRAFT: "pending",
+    BLOCKED: "failure",
+}
+
 # Der Bot-Login, unter dem Codex sowohl Review-Objekte als auch Issue-Kommentare
 # hinterlaesst. GitHub haengt an App-Logins immer "[bot]" an.
 CODEX_LOGIN = "chatgpt-codex-connector[bot]"
@@ -191,14 +214,17 @@ def main(argv: list[str] | None = None) -> int:
 
     raw = sys.stdin.read() if args.payload == "-" else open(args.payload, encoding="utf-8").read()
     state, reason = classify(json.loads(raw))
+    status = COMMIT_STATUS[state]
 
     print(f"state={state}")
+    print(f"status={status}")
     print(f"reason={reason}")
 
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(f"state={state}\n")
+            fh.write(f"status={status}\n")
             fh.write(f"reason={reason}\n")
     # Immer 0: Ueber rot oder gruen entscheidet der Workflow.
     return 0
