@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- **Merge-Gate `codex-gate`.** Am 28.8.2026 lagen bei drei PRs zwischen «ready
+  for review» und Merge drei bis vier Sekunden (#98: 4 s, #99: 4 s,
+  fedlex-mcp#62: 3 s); `get_reviews` und `get_comments` kamen bei allen dreien
+  leer zurück. Codex wird beim Umschalten von Draft auf ready ausgelöst und
+  braucht danach Zeit — das Häkchen im PR-Template war gesetzt, der Review hatte
+  nicht stattgefunden.
+
+  Der neue Workflow setzt einen Commit-Status `codex-gate` auf den PR-Head und
+  wird nur grün, wenn Codex diesen Head nachweislich geprüft hat: Review-Objekt
+  ODER Befundlos-Meldung. Kontingent- und Environment-Meldung lassen ihn rot,
+  ein Draft ebenfalls.
+
+  Bewusst **kein Timer**: Ein Gate, das nach N Minuten von selbst grün wird,
+  behauptet eine Prüfung, die es nicht gesehen hat — am 21./22.8. war das
+  Kontingent über eine Spanne von mindestens 25 h weg. Die Wartezeit ist die
+  Folge, nicht die Einstellung.
+
+  Die Einordnung steht in `scripts/classify_codex_review.py` neben ihrem Test,
+  nicht im YAML. **Wirksam wird das Gate erst, wenn `codex-gate` in den
+  Repo-Einstellungen als required status check auf `main` steht** — am 28.8.
+  war `main` `protected: false`, es gab überhaupt keinen Required Check.
+
 ### Behoben
 
 - **Ein erfolgreicher HTTP-Abruf ohne JSON-Body kam als «Unerwarteter Fehler»
