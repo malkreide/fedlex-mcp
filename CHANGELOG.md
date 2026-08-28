@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Behoben
+
+- **Zwei Befunde aus dem ersten echten Codex-Review am Gate.** Auf
+  `fedlex-mcp#64` (Commit `5d5f033517`, 28.8.2026) meldete Codex zwei Luecken in
+  `classify_codex_review.py`; beide am Code nachvollzogen und beide echt.
+
+  **P1 — die Frische hing am falschen Zeitpunkt.** `head_committed_at` ist das
+  Committer-Datum, nicht der Zeitpunkt, zu dem der Commit PR-Head wurde. Wer
+  lokal committet (T1), waehrend Codex noch den ALTEN Head befundlos meldet
+  (T2), und erst danach pusht (T3), gewann: T2 > T1, der Kommentar rutschte
+  durch und markierte einen Stand als geprueft, den Codex nie gesehen hatte.
+  Der Anker ist jetzt das spaetere aus Committer-Datum und `head_seen_at` —
+  dem ersten eigenen `codex-gate`-Status auf diesem SHA, gesetzt vom Lauf, den
+  der Push ausgeloest hat.
+
+  **P2 — der erste Treffer gewann statt des neuesten.** `listComments` liefert
+  chronologisch. Kam zuerst die Kontingent-Meldung und danach, nach einem Retry
+  auf unveraendertem Head, die Befundlos-Meldung, blieb das Gate rot, obwohl
+  Codex inzwischen geprueft hatte. Jetzt gewinnt der neueste Kommentar — in
+  beide Richtungen: Eine spaetere Ausfallmeldung wird auch nicht mehr von einer
+  aelteren Befundlos-Meldung zugedeckt, sonst waere der Fehler nur gespiegelt.
+
+  Das Review-Objekt bleibt vorrangig vor allen Kommentaren: Es traegt eine
+  Commit-Angabe, und ein SHA-Bezug ist das staerkere Indiz als ein Zeitstempel.
+
+  Nebenbei der erste Beleg, dass die Mechanik im Feld traegt: Das Gate stand
+  auf `pending`, Codex lief an, und der Befund kam an einem PR heraus, der
+  ohne dieses Gate in vier Sekunden gemergt worden waere.
+
 ### Hinzugefügt
 
 - **Merge-Gate `codex-gate`.** Am 28.8.2026 lagen bei drei PRs zwischen «ready

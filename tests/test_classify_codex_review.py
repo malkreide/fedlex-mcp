@@ -317,3 +317,122 @@ def test_cli_gibt_fuer_draft_pending_aus(tmp_path):
     )
     assert "state=draft" in out.stdout
     assert "status=pending" in out.stdout
+
+
+# --- Codex-Review vom 28.8.2026 auf fedlex-mcp#64 -----------------------------
+#
+# Zwei Befunde am Commit 5d5f033517, beide am Code nachvollzogen und beide echt.
+# Sie stehen hier zuerst als fallende Tests, dann kam der Fix — nicht umgekehrt.
+
+
+def test_p1_kommentar_zwischen_lokalem_commit_und_push_zaehlt_nicht():
+    """P1: Die Frische darf nicht am Commit-Datum haengen.
+
+    `head_committed_at` ist das Committer-Datum, nicht der Zeitpunkt, zu dem der
+    Commit PR-Head wurde. Wer lokal committet (T1), waehrend Codex noch den
+    ALTEN Head befundlos meldet (T2), und erst danach pusht (T3), haette mit der
+    alten Regel gewonnen: T2 > T1, der Kommentar rutscht durch — und markiert
+    einen Stand als geprueft, den Codex nie gesehen hat.
+
+    `head_seen_at` ist der Zeitpunkt, zu dem wir den SHA erstmals als Head
+    gesehen haben (erster eigener `codex-gate`-Status darauf). Der Anker ist das
+    spaetere der beiden.
+    """
+    state, _ = classify(
+        _payload(
+            head_committed_at="2026-08-28T10:00:00Z",  # T1: lokal committet
+            head_seen_at="2026-08-28T12:00:00Z",  # T3: gepusht
+            comments=[
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T11:00:00Z",  # T2: galt dem ALTEN Head
+                )
+            ],
+        )
+    )
+    assert state == PENDING
+
+
+def test_p1_kommentar_nach_dem_push_zaehlt_weiterhin():
+    """Gegenprobe zu P1: Der Anker darf nicht alles wegfiltern."""
+    state, _ = classify(
+        _payload(
+            head_committed_at="2026-08-28T10:00:00Z",
+            head_seen_at="2026-08-28T12:00:00Z",
+            comments=[
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T12:30:00Z",
+                )
+            ],
+        )
+    )
+    assert state == REVIEWED
+
+
+def test_p2_spaetere_befundlos_meldung_schlaegt_aeltere_kontingent_meldung():
+    """P2: Nicht der erste Treffer gewinnt, sondern der neueste.
+
+    `listComments` liefert chronologisch. Kam zuerst die Kontingent-Meldung und
+    danach — nach einem Retry auf unveraendertem Head — die Befundlos-Meldung,
+    blieb das Gate mit der alten Regel rot, obwohl Codex inzwischen geprueft
+    hatte.
+    """
+    state, _ = classify(
+        _payload(
+            comments=[
+                _comment(
+                    "You have reached your Codex usage limits for code reviews.",
+                    created_at="2026-08-28T12:00:00Z",
+                ),
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T12:30:00Z",
+                ),
+            ]
+        )
+    )
+    assert state == REVIEWED
+
+
+def test_p2_aeltere_befundlos_meldung_rettet_keine_neuere_kontingent_meldung():
+    """Die Gegenrichtung, damit «neuester gewinnt» nicht zur Einbahn wird.
+
+    Ohne diesen Test koennte man P2 auch «befundlos gewinnt immer» loesen — und
+    haette den Fehler nur gespiegelt: Ein spaeterer Ausfall waere unsichtbar.
+    """
+    state, _ = classify(
+        _payload(
+            comments=[
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T12:00:00Z",
+                ),
+                _comment(
+                    "You have reached your Codex usage limits for code reviews.",
+                    created_at="2026-08-28T12:30:00Z",
+                ),
+            ]
+        )
+    )
+    assert state == BLOCKED
+
+
+def test_review_objekt_schlaegt_jeden_kommentar():
+    """Das Review-Objekt bleibt vorrangig: Es traegt eine Commit-Angabe.
+
+    Ein Kommentar traegt nur einen Zeitstempel; der SHA-Bezug ist das staerkere
+    Indiz und wird von «neuester gewinnt» nicht ueberstimmt.
+    """
+    state, _ = classify(
+        _payload(
+            reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED"}],
+            comments=[
+                _comment(
+                    "You have reached your Codex usage limits for code reviews.",
+                    created_at="2026-08-28T23:00:00Z",
+                )
+            ],
+        )
+    )
+    assert state == REVIEWED

@@ -73,7 +73,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 REVIEWED = "reviewed"
@@ -115,6 +115,10 @@ MARK_NO_FINDING = "didn't find any major issues"
 MARK_QUOTA = "usage limits for code reviews"
 MARK_NO_ENVIRONMENT = "create an environment for this repo"
 
+# Rangplatz fuer Kommentare ohne lesbaren Zeitstempel: aelter als alles
+# Datierte, damit sie keinen datierten Kommentar ueberstimmen.
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+
 
 def _parse_ts(value: str | None) -> datetime | None:
     if not value:
@@ -123,6 +127,12 @@ def _parse_ts(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _latest(*times: datetime | None) -> datetime | None:
+    """Der spaeteste der uebergebenen Zeitpunkte, oder None wenn keiner da ist."""
+    known = [t for t in times if t is not None]
+    return max(known) if known else None
 
 
 def _is_codex(author: Any) -> bool:
@@ -142,7 +152,20 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
         )
 
     head_sha = payload.get("head_sha") or ""
-    head_time = _parse_ts(payload.get("head_committed_at"))
+    # Der Anker fuer die Frische von Kommentaren. `head_committed_at` allein
+    # reicht nicht: Es ist das Committer-Datum, nicht der Zeitpunkt, zu dem der
+    # Commit PR-Head wurde (Codex-Review vom 28.8.2026, P1). Wer lokal committet
+    # (T1), waehrend Codex noch den ALTEN Head befundlos meldet (T2), und erst
+    # danach pusht (T3), haette gewonnen: T2 > T1, der Kommentar rutscht durch
+    # und markiert einen Stand als geprueft, den Codex nie gesehen hat.
+    #
+    # `head_seen_at` ist der Zeitpunkt, zu dem wir den SHA erstmals als Head
+    # gesehen haben — der erste eigene `codex-gate`-Status darauf, gesetzt vom
+    # Lauf, den der Push ausgeloest hat. Das spaetere der beiden gilt.
+    head_time = _latest(
+        _parse_ts(payload.get("head_committed_at")),
+        _parse_ts(payload.get("head_seen_at")),
+    )
 
     # 1) Review-Objekt — traegt eine Commit-Angabe und ist damit eindeutig
     #    einem Stand zuzuordnen.
@@ -159,14 +182,28 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
 
     # 2) Gewoehnliche Issue-Kommentare — drei bekannte Bedeutungen, und eine
     #    vierte Moeglichkeit, die woertlich weitergereicht wird.
-    unknown: list[str] = []
-    for comment in payload.get("comments") or []:
+    #
+    #    Es gewinnt der NEUESTE, nicht der erste Treffer (Codex-Review vom
+    #    28.8.2026, P2). `listComments` liefert chronologisch: Kam zuerst die
+    #    Kontingent-Meldung und danach — nach einem Retry auf unveraendertem
+    #    Head — die Befundlos-Meldung, blieb das Gate sonst rot, obwohl Codex
+    #    inzwischen geprueft hatte. Die Gegenrichtung zaehlt genauso: Eine
+    #    spaetere Ausfallmeldung darf nicht von einer aelteren Befundlos-Meldung
+    #    zugedeckt werden, sonst ist der Fehler nur gespiegelt.
+    eligible: list[tuple[datetime, int, str]] = []
+    for i, comment in enumerate(payload.get("comments") or []):
         if not _is_codex(comment.get("user")):
             continue
         made = _parse_ts(comment.get("created_at"))
         if head_time and made and made < head_time:
             continue  # aelter als der jetzige Head — hat ihn nicht gesehen
-        body = (comment.get("body") or "").strip()
+        # Ohne Zeitstempel ans Ende der Rangfolge: Ein Kommentar, dessen Alter
+        # unbekannt ist, darf keinen datierten ueberstimmen. Die Reihenfolge aus
+        # der API bleibt als Tiebreak.
+        eligible.append((made or _EPOCH, i, (comment.get("body") or "").strip()))
+
+    if eligible:
+        _, _, body = max(eligible)
         low = body.lower()
         if MARK_NO_FINDING in low:
             return REVIEWED, "Codex meldet keinen Befund (Befundlos-Meldung)"
@@ -184,12 +221,9 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
                 "geprueft. Anzulegen je Repo unter "
                 "chatgpt.com/codex/cloud/settings/environments",
             )
-        unknown.append(body)
-
-    if unknown:
         # Nicht in eine bekannte Schublade zwingen. Die Liste der Gruende ist
         # schon einmal von drei auf vier gewachsen.
-        first = unknown[0].replace("\n", " ")[:200]
+        first = body.replace("\n", " ")[:200]
         return (
             BLOCKED,
             f"Codex hat etwas Unbekanntes gemeldet, woertlich: «{first}» — von "
