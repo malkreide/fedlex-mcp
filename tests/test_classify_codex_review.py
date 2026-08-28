@@ -491,3 +491,65 @@ def test_p1b_ohne_beobachtung_bleibt_das_committer_datum_der_rueckfall():
         )
     )
     assert state == PENDING
+
+
+# --- Dritter Codex-Review, 28.8.2026 auf fedlex-mcp#66 ------------------------
+#
+# Der Befund war kein Denkfehler am Anker, sondern eine fehlende Permission:
+# Der explizite `permissions`-Block nannte kein `checks`, GitHub setzt jeden
+# nicht genannten Scope auf `none`, und `listSuitesForRef` braucht `checks:
+# read`. Der 403 landete im `catch`, `head_seen_at` blieb leer — und die Frische
+# fiel still auf das Committer-Datum zurueck, also in die Luecke von Runde 1.
+#
+# Die Permission steht im Workflow und ist von hier aus nicht pruefbar. Was
+# hier geprueft wird, ist der Grund, warum der Fehler ueberhaupt so lange
+# unsichtbar war: Ein stiller Rueckfall sieht aus wie ein gesunder Lauf.
+
+
+def test_unlesbare_check_suites_stehen_in_der_begruendung():
+    """Ein degradierter Anker muss man dem Status ansehen.
+
+    Sonst meldet das Gate «noch kein Signal» und verschweigt, dass es gerade
+    mit der schwaecheren Frischepruefung arbeitet — genau die Sorte Meldung,
+    die diese ganze Sitzung teuer gemacht hat.
+    """
+    state, reason = classify(_payload(head_seen_unavailable=True))
+
+    assert state == PENDING
+    assert "checks: read" in reason
+
+
+def test_ohne_stoerung_keine_warnung_in_der_begruendung():
+    """Gegenprobe: Der Hinweis darf nicht im Normalfall mitlaufen.
+
+    Eine Warnung, die immer dasteht, liest nach der dritten Woche niemand mehr.
+    """
+    _, reason = classify(_payload())
+    assert "checks: read" not in reason
+
+
+def test_warnung_auch_bei_einem_kommentar_basierten_urteil():
+    """Der Hinweis haengt an der Frischepruefung, nicht am Zustand.
+
+    Gerade das gruene Urteil ist der Fall, in dem der degradierte Anker
+    schaedlich waere — dort muss er sichtbar sein.
+    """
+    _, reason = classify(
+        _payload(
+            head_seen_unavailable=True,
+            comments=[_comment("Codex Review: Didn't find any major issues. Swish!")],
+        )
+    )
+    assert "checks: read" in reason
+
+
+def test_review_objekt_braucht_die_warnung_nicht():
+    """Ein Review-Objekt haengt am SHA, nicht am Zeitstempel — dort ist der
+    Anker gleichgueltig, und ein Hinweis waere nur Rauschen."""
+    _, reason = classify(
+        _payload(
+            head_seen_unavailable=True,
+            reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED"}],
+        )
+    )
+    assert "checks: read" not in reason
