@@ -1,7 +1,7 @@
 """
 swiss-mcp-commons — wiederverwendbarer SPARQL-/JSON-Client mit Retry.
 
-VENDORED COPY (v1.1.0). Dieses Modul wird **byte-identisch** in mehreren
+VENDORED COPY (v1.2.0). Dieses Modul wird **byte-identisch** in mehreren
 `*-mcp`-Servern des Portfolios vorgehalten (aktuell `swiss-environment-mcp` und
 `fedlex-mcp`). Kanonische Quelle ist genau diese Datei — Änderungen hier und in
 den Schwesterkopien **synchron** halten, bis ein installierbares Paket
@@ -12,6 +12,24 @@ Das Modul kapselt den gemeinsamen Client-Aufbau (ursprünglich aus `fedlex-mcp`,
 `_execute_sparql`): GET mit `format=application/sparql-results+json`, Retry
 ausschliesslich bei transienten Fehlern (429/5xx, Timeout/Netzwerk) mit
 exponentiellem Backoff, deterministische 4xx sofort durchgereicht.
+
+**v1.2.0 — warum die Fassung steigt.** Beide Parser-Pfade riefen
+`response.json()` nackt auf. Eine HTTP-erfolgreiche Antwort, deren Body kein
+JSON ist, starb damit als `json.JSONDecodeError` — ein Typ, den die
+Fehlerabbildung der aufrufenden Server nicht kennt, also landete er in deren
+Sammelzweig («Unerwarteter Fehler»). Diese Meldung zeigt auf den Server, obwohl
+die Quelle den Vertrag gebrochen hat, und nennt weder Status noch Content-Type,
+an denen der Unterschied hinge. Gemessen an `swiss-environment-mcp` am
+23.8.2026: zwei Live-Tests rot, Ursache erst nach Abfrage der Quelle einordbar.
+`get_bindings` und `get_json` werfen jetzt `NotJsonError` mit Status,
+Content-Type und Body-Auszug.
+
+**Und ein Hinweis in eigener Sache.** Die Fassung ist auf 1.2.0 gehoben, weil
+sie bei v1.1.0 auf beiden Seiten unverändert stand, während die Dateien
+auseinanderliefen — erst beim Retry-Fix, dann beim `_sleep`-Alias, der am
+28.8.2026 in `fedlex-mcp` steckte und in `swiss-environment-mcp` fehlte. Ein
+Marker, der sich nicht bewegt, belegt keine Gleichheit. Wer hier etwas ändert,
+hebt ihn mit und trägt die Änderung in beide Kopien.
 
 **Bewusst abhängigkeitsarm** (nur `httpx`, `asyncio`) und ohne Bezug auf
 server-spezifische Egress-/Client-/Logging-Details — der Egress-Guard und das
@@ -34,6 +52,50 @@ import httpx
 # sieht lokal aus, ersetzt `sleep` aber auf dem geteilten Modulobjekt — fuer
 # httpx, respx, pytest-asyncio und jeden anderen Importeur im Prozess.
 _sleep = asyncio.sleep
+
+# Wie viel des fremden Bodys in die Diagnose darf. Genug, um eine HTML-
+# Fehlerseite von einem leeren Body zu unterscheiden; zu wenig, um ein Log oder
+# eine Fehlermeldung mit fremdem Text zu fluten.
+BODY_EXCERPT_CHARS = 120
+
+
+class NotJsonError(Exception):
+    """HTTP war erfolgreich, der Body ist trotzdem nicht die vereinbarte Form.
+
+    Abgegrenzt gegen `httpx.HTTPStatusError` («die Quelle hat den Abruf
+    abgelehnt»): Diese hier heisst «die Quelle hat geliefert, nur etwas
+    anderes» — ein gebrochener Vertrag, und damit die Klasse, die eine
+    nächtliche Live-Suite sichtbar machen soll.
+
+    Die drei Attribute tragen genau die Tatsachen, die zur Einordnung nötig
+    sind, und alle drei stammen von der Quelle — keines aus dem Prozess des
+    Aufrufers. Was davon ans LLM geht, entscheidet der Server in seiner
+    Fehlerabbildung; dieses Modul kennt dessen Regeln nicht.
+    """
+
+    def __init__(self, url: str, status_code: int, content_type: str, excerpt: str) -> None:
+        self.url = url
+        self.status_code = status_code
+        self.content_type = content_type
+        self.excerpt = excerpt
+        super().__init__(
+            f"{url}: HTTP {status_code}, Content-Type '{content_type}', "
+            f"kein JSON (Beginn: {excerpt!r})"
+        )
+
+
+def _json_body(response: httpx.Response) -> Any:
+    """Parst den Body als JSON — oder sagt, was stattdessen ankam."""
+    try:
+        return response.json()
+    except ValueError as e:
+        raise NotJsonError(
+            str(response.request.url),
+            response.status_code,
+            response.headers.get("content-type", ""),
+            response.text[:BODY_EXCERPT_CHARS],
+        ) from e
+
 
 # Transiente HTTP-Status → Retry. 4xx (ausser 429) sind deterministisch.
 RETRYABLE_STATUS: frozenset[int] = frozenset({429, 502, 503, 504})
@@ -227,7 +289,19 @@ async def get_bindings(
         egress_check=egress_check,
         on_retry=on_retry,
     )
-    return response.json().get("results", {}).get("bindings", [])
+    payload = _json_body(response)
+    # Gültiges JSON ist noch nicht die vereinbarte Form. Stand hier vorher
+    # `.get(...)` direkt, warf eine Liste oder ein Skalar ein `AttributeError`
+    # — wieder ein Typ, den die Fehlerabbildung der Server nicht kennt, und
+    # wieder «Unerwarteter Fehler» für einen Vertragsbruch der Quelle.
+    if not isinstance(payload, dict):
+        raise NotJsonError(
+            str(response.request.url),
+            response.status_code,
+            response.headers.get("content-type", ""),
+            response.text[:BODY_EXCERPT_CHARS],
+        )
+    return payload.get("results", {}).get("bindings", [])
 
 
 async def get_json(
@@ -253,4 +327,4 @@ async def get_json(
         egress_check=egress_check,
         on_retry=on_retry,
     )
-    return response.json()
+    return _json_body(response)
