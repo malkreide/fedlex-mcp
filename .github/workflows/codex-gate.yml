@@ -1,0 +1,184 @@
+# Merge-Gate: Erst mergen, wenn Codex diesen Head geprueft hat.
+#
+# WOGEGEN DAS GEBAUT IST
+# ----------------------
+# Am 28.8.2026 lagen bei drei PRs zwischen «ready for review» und Merge drei
+# bis vier Sekunden; `get_reviews` und `get_comments` kamen bei allen dreien
+# leer zurueck. Codex wird beim Umschalten von Draft auf ready ausgeloest und
+# braucht danach Zeit — wer sofort mergt, hat das Haekchen im PR-Template
+# gesetzt und den Review nicht abgewartet. Dasselbe steht fuer den 21./22.8.
+# schon in CLAUDE.md.
+#
+# DIE WARTEZEIT IST EINE FOLGE, KEINE EINSTELLUNG
+# -----------------------------------------------
+# Ein Gate, das nach N Minuten von selbst gruen wird, behauptet eine Pruefung,
+# die es nicht gesehen hat. Am 21./22.8. war das Kontingent ueber eine Spanne
+# von mindestens 25 h weg; ein Timer waere durchgelaufen und haette 75
+# ungeprueften PRs ein gruenes Haekchen gegeben. Deshalb wartet dieser Job auf
+# ein *Signal*, nicht auf eine Uhr: Solange keins da ist, bleibt der Status rot,
+# und der Merge steht. `POLL_MAX_SECONDS` begrenzt nur, wie lange ein einzelner
+# Lauf pollt — nicht, ab wann gemergt werden darf.
+#
+# WARUM COMMIT-STATUS UND NICHT DER CHECK-RUN DES JOBS
+# ----------------------------------------------------
+# Der Job laeuft auch auf `issue_comment`, damit ein spaeter eintreffender
+# Codex-Kommentar den Status sofort nachzieht. Bei diesem Event ist `github.sha`
+# aber der Head des Default-Branch, nicht der des PR — ein Check-Run daraus
+# haenge am falschen Commit (und faerbte `main` rot). Ein Commit-Status laesst
+# sich dagegen ausdruecklich auf den PR-Head richten. Deshalb traegt der Status
+# das Urteil, und der Job endet immer mit 0.
+#
+# WAS NOCH FEHLT, DAMIT ES WIRKT
+# -------------------------------
+# Dieser Workflow allein haelt nichts auf. Der Kontext `codex-gate` muss in den
+# Repo-Einstellungen als *required status check* auf `main` stehen, inklusive
+# «Do not allow bypassing the above settings» — sonst bleibt der Merge-Button
+# klickbar und das Gate ist Dekoration. Stand 28.8.2026 war `main` in beiden
+# Repos ungeschuetzt (`protected: false`), es gab also ueberhaupt keinen
+# Required Check.
+
+name: Codex-Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, ready_for_review, synchronize, converted_to_draft]
+  # Codex meldet sich als gewoehnlicher Issue-Kommentar (Befundlos-,
+  # Kontingent-, Environment-Meldung) oder als Review-Objekt. Beide Wege
+  # muessen den Status nachziehen koennen.
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  # Je PR nur ein Lauf: Ein zweiter wuerde denselben Status widerspruechlich
+  # ueberschreiben, je nachdem welcher zuerst fertig wird.
+  group: codex-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Codex hat diesen Head geprueft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # `issue_comment` feuert auch auf echte Issues — dort gibt es keinen Head,
+    # den man pruefen koennte.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      github.event.issue.pull_request != null
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Pollen, bis Codex gesprochen hat
+        id: gate
+        uses: actions/github-script@v7
+        env:
+          POLL_MAX_SECONDS: "900"
+          POLL_INTERVAL_SECONDS: "30"
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
+
+            const number = context.payload.pull_request?.number
+                        ?? context.payload.issue?.number;
+            const maxMs = Number(process.env.POLL_MAX_SECONDS) * 1000;
+            const stepMs = Number(process.env.POLL_INTERVAL_SECONDS) * 1000;
+            const deadline = Date.now() + maxMs;
+
+            // Der Status wird sofort auf `pending` gesetzt: Ein Gate, das erst
+            // am Ende des Laufs auftaucht, laesst genau das Fenster offen, das
+            // es schliessen soll.
+            const setStatus = async (sha, state, description) => {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo, sha, state, context: 'codex-gate',
+                description: description.slice(0, 140),
+              });
+            };
+
+            let last = { state: 'pending', reason: 'Lauf gestartet' };
+            let sha = null;
+
+            while (true) {
+              const { data: pr } = await github.rest.pulls.get({
+                ...context.repo, pull_number: number,
+              });
+              sha = pr.head.sha;
+              const { data: headCommit } = await github.rest.repos.getCommit({
+                ...context.repo, ref: sha,
+              });
+              const [reviews, comments] = await Promise.all([
+                github.paginate(github.rest.pulls.listReviews, {
+                  ...context.repo, pull_number: number, per_page: 100,
+                }),
+                github.paginate(github.rest.issues.listComments, {
+                  ...context.repo, issue_number: number, per_page: 100,
+                }),
+              ]);
+
+              // Fremdtext (Kommentar-Bodies) geht ueber eine Datei ins Skript,
+              // nicht ueber die Kommandozeile oder ein Template-Literal.
+              const payload = {
+                draft: pr.draft,
+                head_sha: sha,
+                head_committed_at: headCommit.commit.committer.date,
+                reviews: reviews.map((r) => ({
+                  user: { login: r.user?.login }, commit_id: r.commit_id, state: r.state,
+                })),
+                comments: comments.map((c) => ({
+                  user: { login: c.user?.login }, body: c.body, created_at: c.created_at,
+                })),
+              };
+              fs.writeFileSync('codex-payload.json', JSON.stringify(payload));
+
+              const out = execFileSync('python', [
+                'scripts/classify_codex_review.py', '--payload', 'codex-payload.json',
+              ], { encoding: 'utf-8' });
+              const state = /^state=(.*)$/m.exec(out)?.[1] ?? 'pending';
+              const status = /^status=(.*)$/m.exec(out)?.[1] ?? 'pending';
+              const reason = /^reason=(.*)$/m.exec(out)?.[1] ?? '';
+              last = { state, reason };
+              core.info(`${state} -> ${status}: ${reason}`);
+
+              // Welcher Status zu welchem Befund gehoert, entscheidet das
+              // Skript (COMMIT_STATUS) — dort steht es neben seinem Test.
+              await setStatus(sha, status, reason);
+
+              // `reviewed`, `blocked` und `draft` aendern sich nicht durchs
+              // Warten: Der erste ist fertig, die beiden anderen brauchen eine
+              // Handlung. Nur `pending` ist ein Zustand, aus dem Pollen
+              // herausfuehrt.
+              if (state !== 'pending') break;
+              if (Date.now() + stepMs > deadline) {
+                // Bleibt `pending`, nicht `failure`: Dass dieser Lauf sein
+                // Zeitfenster ausgeschoepft hat, sagt nichts darueber, ob
+                // Codex noch antwortet — der `issue_comment`-Trigger zieht den
+                // Status nach. Der Merge bleibt so oder so blockiert.
+                await setStatus(sha, 'pending',
+                  `${reason} — Zeitfenster dieses Laufs abgelaufen`);
+                break;
+              }
+              await new Promise((r) => setTimeout(r, stepMs));
+            }
+
+            await core.summary
+              .addHeading('Codex-Gate')
+              .addRaw(`**${last.state}** — ${last.reason}`)
+              .write();
+
+            // Bewusst kein Fehler: Das Urteil traegt der Commit-Status auf dem
+            // PR-Head. Ein rot beendeter Job wuerde bei `issue_comment` ein
+            // rotes Kreuz an den Default-Branch haengen.

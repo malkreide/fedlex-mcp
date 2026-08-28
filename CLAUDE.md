@@ -251,6 +251,33 @@ ruff format --check src/ tests/ scripts/
 ```
 
 Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Scan.
+
+**Ein drittes PR-Gate, und es prüft keinen Code:** `codex-gate.yml`. Es setzt
+einen Commit-Status `codex-gate` auf den PR-Head und wird nur grün, wenn Codex
+diesen Head nachweislich geprüft hat — Review-Objekt ODER Befundlos-Meldung.
+Kontingent- und Environment-Meldung lassen es **rot**: Beide heissen
+ausdrücklich «nicht geprüft», und ohne Handlung ändert sich daran nichts. Ein
+Draft steht auf **gelb** — er ist ohnehin nicht mergebar, und ein Repo, in dem
+jeder Draft ein rotes Kreuz trägt, bringt seinen Leuten bei, rote Kreuze zu
+übersehen. Das Gate hat sich diese Lektion selbst erteilt: Seine ersten beiden
+Läufe färbten zwei frische Draft-PRs rot.
+
+Bewusst kein Timer. Ein Gate, das nach N Minuten von selbst grün wird,
+behauptet eine Prüfung, die es nicht gesehen hat — am 21./22.8. war das
+Kontingent über eine Spanne von mindestens 25 h weg, ein Timer wäre die ganze
+Zeit durchgelaufen. Die Wartezeit ist die Folge, nicht die Einstellung: Solange
+kein Signal da ist, bleibt der Status rot.
+
+Die Einordnung steht in `scripts/classify_codex_review.py` neben ihrem Test,
+nicht im YAML — aus demselben Grund wie bei `classify_live_run.py`.
+
+**Das Gate wirkt nur mit Branch Protection.** Der Kontext `codex-gate` muss auf
+`main` als *required status check* stehen, samt «Do not allow bypassing the
+above settings». Ohne das bleibt der Merge-Button klickbar. Am 28.8.2026 war
+`main` hier `protected: false` — es gab überhaupt keinen Required Check, die
+sechs grünen Häkchen waren informativ. Wer die Protection wegnimmt, nimmt
+das Gate weg, ohne dass eine Datei sich ändert.
+
 Alle Gates laufen auf allen drei Versionen, keine `if:`-Ausnahme; ein
 `fail-fast: false` steht nicht da.
 
