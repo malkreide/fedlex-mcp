@@ -509,6 +509,19 @@ def handle_error(tool: str, e: Exception, service: str = "Fedlex") -> str:
     log.warning(
         "tool_error", tool=tool, service=service, error_type=type(e).__name__, detail=str(e)
     )
+    if isinstance(e, sparql_client.NotJsonError):
+        # HTTP war in Ordnung, der Body nicht. Ohne diesen Zweig fiele der Fall
+        # in den Sammelzweig am Ende und behauptete einen «Unerwarteten Fehler
+        # beim Abruf» — also einen Fehler bei uns, obwohl der Endpoint den
+        # Vertrag gebrochen hat. Status und Content-Type stammen von der Quelle
+        # und sind kein Leak von Interna (OBS-002); Body-Auszug und URL bleiben
+        # im Log, das `handle_error` oben ohnehin schreibt.
+        return (
+            f"Fehler: {service} hat mit HTTP {e.status_code} geantwortet, aber kein "
+            f"JSON geliefert (Content-Type: '{e.content_type or 'nicht gesetzt'}'). "
+            "Das ist ein Problem des Endpoints, nicht der Abfrage. Bitte später "
+            "erneut versuchen."
+        )
     if isinstance(e, httpx.HTTPStatusError):
         code = e.response.status_code
         if code == 400:

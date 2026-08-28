@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Behoben
 
+- **Ein erfolgreicher HTTP-Abruf ohne JSON-Body kam als «Unerwarteter Fehler»
+  heraus.** `sparql_client.get_bindings` rief `response.json()` nackt auf — und
+  das ist der Pfad, den dieser Server für **jede** SPARQL-Abfrage fährt. Ein
+  Endpoint, der eine HTML-Wartungsseite mit HTTP 200 ausliefert, hätte jedes
+  Tool mit «Unerwarteter Fehler beim Abruf vom Fedlex-Endpoint» beantwortet:
+  eine Meldung, die auf uns zeigt, obwohl die Quelle den Vertrag gebrochen hat,
+  und die weder Status noch Content-Type nennt.
+
+  `get_bindings` und `get_json` werfen jetzt `NotJsonError` mit Status,
+  Content-Type und Body-Auszug; `handle_error` benennt den Endpoint. Dazu ein
+  Guard gegen gültiges JSON in der falschen Form: eine Liste statt des
+  SPARQL-Umschlags warf vorher `AttributeError: 'list' object has no attribute
+  'get'` — derselbe Sammelzweig, dieselbe nichtssagende Meldung.
+
+  Nachzug aus `swiss-environment-mcp`, wo dieselbe Stelle am 23.8.2026 zwei
+  Live-Tests rot machte und die Ursache erst nach Abfrage der Quelle einordbar
+  war.
+
+### Geändert
+
+- **Vendored copy `sparql_client.py` auf v1.2.0.** Die Fassung stand bei v1.1.0
+  auf beiden Seiten unverändert, während die Dateien auseinanderliefen — erst
+  beim Retry-Fix, dann beim `_sleep`-Alias, der am 28.8.2026 hier steckte und in
+  `swiss-environment-mcp` fehlte. Ein Marker, der sich nicht bewegt, belegt keine
+  Gleichheit. Beide Kopien sind wieder byte-identisch (md5 `b877c137`), und der
+  Kopf der Datei sagt jetzt, dass eine Änderung den Marker mithebt.
+
 - **`DELETE` fehlte in `allow_methods`.** Auf streamable-http beendet die
   Methode eine Session ausdrücklich; der Preflight wies sie mit 400 ab. Ein
   Browser-Client konnte damit Sessions öffnen, aber nie schliessen — sie liefen
