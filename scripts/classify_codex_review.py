@@ -129,12 +129,6 @@ def _parse_ts(value: str | None) -> datetime | None:
         return None
 
 
-def _latest(*times: datetime | None) -> datetime | None:
-    """Der spaeteste der uebergebenen Zeitpunkte, oder None wenn keiner da ist."""
-    known = [t for t in times if t is not None]
-    return max(known) if known else None
-
-
 def _is_codex(author: Any) -> bool:
     if not isinstance(author, dict):
         return False
@@ -159,12 +153,26 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
     # danach pusht (T3), haette gewonnen: T2 > T1, der Kommentar rutscht durch
     # und markiert einen Stand als geprueft, den Codex nie gesehen hat.
     #
-    # `head_seen_at` ist der Zeitpunkt, zu dem wir den SHA erstmals als Head
-    # gesehen haben — der erste eigene `codex-gate`-Status darauf, gesetzt vom
-    # Lauf, den der Push ausgeloest hat. Das spaetere der beiden gilt.
-    head_time = _latest(
-        _parse_ts(payload.get("head_committed_at")),
-        _parse_ts(payload.get("head_seen_at")),
+    # `head_seen_at` ist der Zeitpunkt, zu dem GitHub den SHA erstmals gesehen
+    # hat: die frueheste Check-Suite auf diesem Commit. Sie entsteht beim Push
+    # und haengt an keinem Lauf von uns.
+    #
+    # Die Laufzeit des Workflows taugt dafuer NICHT (zweiter Codex-Review,
+    # 28.8.2026). Ein `issue_comment`-Lauf startet zwangslaeufig NACH dem
+    # Kommentar, der ihn ausgeloest hat; ist er der erste, der hier ankommt —
+    # weil der `synchronize`-Lauf abgebrochen wurde, und `cancel-in-progress`
+    # macht genau das wahrscheinlich —, laege der Anker hinter dem einzigen
+    # gueltigen Signal. Das Gate haenge dann dauerhaft auf `pending`. Ein
+    # Dauerstall ist schlimmer als die Luecke, die der Anker schliessen soll.
+    # `head_seen_at` gilt, wenn es da ist — nicht das spaetere der beiden.
+    # `max` sah sicherer aus und oeffnet einen Stall: Ein Commit mit
+    # vorgestelltem Committer-Datum (Uhrenversatz, oder von Hand gesetzt) zoege
+    # den Anker in die Zukunft, und dann faellt JEDER echte Codex-Kommentar
+    # durch die Pruefung — das Gate haengt dauerhaft auf `pending`, obwohl
+    # geprueft wurde. Das Committer-Datum ist nur der Rueckfall, wenn keine
+    # Beobachtung vorliegt.
+    head_time = _parse_ts(payload.get("head_seen_at")) or _parse_ts(
+        payload.get("head_committed_at")
     )
 
     # 1) Review-Objekt — traegt eine Commit-Angabe und ist damit eindeutig

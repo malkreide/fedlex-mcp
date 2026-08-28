@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Behoben
 
+- **Der Anker fuer die Kommentar-Frische darf nie die Laufzeit des Workflows
+  sein.** Zweiter Codex-Review am Gate (`swiss-environment-mcp#102`, Commit
+  `9cadda7501`), und der Befund ist eine direkte Folge des Fixes davor: Fehlte
+  ein frueherer `codex-gate`-Status, setzte der Workflow `head_seen_at` auf die
+  aktuelle Zeit des Runners. Ein `issue_comment`-Lauf startet aber
+  zwangslaeufig NACH dem Kommentar, der ihn ausgeloest hat — ist er der erste,
+  der dort ankommt, liegt der Anker hinter dem einzigen gueltigen Signal und das
+  Gate haengt **dauerhaft** auf `pending`, obwohl geprueft wurde. Ein Dauerstall
+  ist schlimmer als die Luecke, die der Anker schliessen soll.
+
+  Dass der `synchronize`-Lauf ausfaellt, ist dabei kein Randfall: Das eigene
+  `cancel-in-progress: true` macht genau das wahrscheinlich.
+
+  `head_seen_at` kommt jetzt aus den **Check-Suites** auf dem SHA — GitHub legt
+  sie beim Push an, unabhaengig von jedem Lauf von uns. Das stimmt in beide
+  Richtungen: Ein Kommentar zum vorigen Head liegt vor diesem Push und damit vor
+  der Suite; ein Kommentar zu diesem Head kann es erst danach geben. Einen
+  Rueckfall auf `now` gibt es nicht mehr.
+
+  Dazu: `head_seen_at` **gilt**, statt mit dem Committer-Datum ueber `max`
+  verrechnet zu werden. `max` sah sicherer aus und oeffnete denselben Stall von
+  der anderen Seite — ein Commit mit vorgestelltem Committer-Datum
+  (Uhrenversatz) zieht den Anker in die Zukunft und laesst jeden echten
+  Kommentar durchfallen. Das Committer-Datum ist nur noch der Rueckfall.
+
 - **Zwei Befunde aus dem ersten echten Codex-Review am Gate.** Auf
   `fedlex-mcp#64` (Commit `5d5f033517`, 28.8.2026) meldete Codex zwei Luecken in
   `classify_codex_review.py`; beide am Code nachvollzogen und beide echt.

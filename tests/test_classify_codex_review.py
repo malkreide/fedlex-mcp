@@ -436,3 +436,58 @@ def test_review_objekt_schlaegt_jeden_kommentar():
         )
     )
     assert state == REVIEWED
+
+
+# --- Zweiter Codex-Review, 28.8.2026 auf swiss-environment-mcp#102 ------------
+#
+# Ein neuer P1, und zwar als direkte Folge des P1-Fixes von vorhin: Der Anker
+# durfte nie die Laufzeit des Workflows sein.
+
+
+def test_p1b_spaeteres_committer_datum_stallt_das_gate_nicht():
+    """Der beobachtete Zeitpunkt schlaegt das Committer-Datum, nicht `max`.
+
+    `max(committed, seen)` sah sicherer aus, oeffnet aber einen Stall: Ein
+    Commit mit vorgestelltem Committer-Datum (Uhrenversatz, oder von Hand
+    gesetzt) zieht den Anker in die Zukunft, und dann faellt JEDER echte
+    Codex-Kommentar durch die Frischepruefung — das Gate haengt dauerhaft auf
+    `pending`, obwohl geprueft wurde.
+
+    `head_seen_at` stammt aus einer Beobachtung von GitHub (wann der SHA dort
+    auftauchte) und ist damit die verlaesslichere Angabe. Sie gilt, wenn sie da
+    ist; das Committer-Datum ist nur der Rueckfall.
+    """
+    state, _ = classify(
+        _payload(
+            head_committed_at="2027-01-01T00:00:00Z",  # in der Zukunft
+            head_seen_at="2026-08-28T12:00:00Z",
+            comments=[
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T12:30:00Z",
+                )
+            ],
+        )
+    )
+    assert state == REVIEWED
+
+
+def test_p1b_ohne_beobachtung_bleibt_das_committer_datum_der_rueckfall():
+    """Gegenprobe: Faellt `head_seen_at` weg, greift wieder das Committer-Datum.
+
+    Sonst waere die Frischepruefung bei fehlender Beobachtung ganz aus — und
+    ein Kommentar zum alten Head koennte den neuen gruen faerben.
+    """
+    state, _ = classify(
+        _payload(
+            head_committed_at="2026-08-28T12:00:00Z",
+            head_seen_at=None,
+            comments=[
+                _comment(
+                    "Codex Review: Didn't find any major issues. Swish!",
+                    created_at="2026-08-28T11:00:00Z",
+                )
+            ],
+        )
+    )
+    assert state == PENDING
