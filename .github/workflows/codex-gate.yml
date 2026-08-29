@@ -56,6 +56,13 @@ permissions:
   pull-requests: read
   issues: read
   statuses: write
+  # `checks: read` fuer `listSuitesForRef`, das den Frische-Anker liefert.
+  # Ein expliziter `permissions`-Block setzt JEDEN nicht genannten Scope auf
+  # `none` — ohne diese Zeile antwortet der Endpunkt mit 403 (dritter
+  # Codex-Review, 28.8.2026). Der Fehler war unsichtbar, weil der `catch`
+  # unten ihn schluckte und die Frische still auf das Committer-Datum
+  # zurueckfiel, also in genau die Luecke, die der Anker schliessen soll.
+  checks: read
 
 concurrency:
   # Je PR nur ein Lauf: Ein zweiter wuerde denselben Status widerspruechlich
@@ -128,6 +135,9 @@ jobs:
             // zum VORIGEN Head liegt vor diesem Push und damit vor der Suite;
             // ein Kommentar zu DIESEM Head kann es erst danach geben.
             const seenCache = new Map();
+            // SHAs, fuer die der Abruf FEHLGESCHLAGEN ist — nicht solche
+            // ohne Check-Suite. Nur ein Defekt gehoert in die Meldung.
+            const seenUnavailable = new Set();
 
             const headSeenAt = async (commit) => {
               if (seenCache.has(commit)) return seenCache.get(commit);
@@ -142,7 +152,14 @@ jobs:
                   .sort();
                 seen = times[0] ?? null;
               } catch (e) {
-                core.warning(`Check-Suites fuer ${commit} nicht lesbar: ${e.message}`);
+                // Nicht mehr bloss `warning`: Ein geschluckter 403 sieht aus
+                // wie ein gesunder Lauf, und genau daran ist die fehlende
+                // `checks: read`-Permission unbemerkt geblieben. Der Vermerk
+                // geht zusaetzlich ins Skript und von dort in den sichtbaren
+                // Status — ein Defekt, den nur das Job-Log kennt, ist keiner,
+                // den jemand findet.
+                core.error(`Check-Suites fuer ${commit} nicht lesbar: ${e.message}`);
+                seenUnavailable.add(commit);
               }
               // Kein Rueckfall auf `now`: lieber ohne Beobachtung weiter (dann
               // greift im Skript das Committer-Datum) als mit einer Zahl, die
@@ -175,6 +192,7 @@ jobs:
                 head_sha: sha,
                 head_committed_at: headCommit.commit.committer.date,
                 head_seen_at: await headSeenAt(sha),
+                head_seen_unavailable: seenUnavailable.has(sha),
                 reviews: reviews.map((r) => ({
                   user: { login: r.user?.login }, commit_id: r.commit_id, state: r.state,
                 })),

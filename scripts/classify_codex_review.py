@@ -119,6 +119,14 @@ MARK_NO_ENVIRONMENT = "create an environment for this repo"
 # Datierte, damit sie keinen datierten Kommentar ueberstimmen.
 _EPOCH = datetime.min.replace(tzinfo=UTC)
 
+# Anhang an die Begruendung, wenn der Anker degradiert ist. Ein stiller
+# Rueckfall sieht aus wie ein gesunder Lauf — genau daran ist der 403 aus
+# der fehlenden `checks: read`-Permission tagelang unbemerkt geblieben.
+_ANKER_DEGRADIERT = (
+    " — Achtung: Check-Suites nicht lesbar, die Frische haengt nur am "
+    "Committer-Datum. Fehlt dem Workflow `checks: read`?"
+)
+
 
 def _parse_ts(value: str | None) -> datetime | None:
     if not value:
@@ -174,6 +182,10 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
     head_time = _parse_ts(payload.get("head_seen_at")) or _parse_ts(
         payload.get("head_committed_at")
     )
+    # Nur wenn die Beobachtung gar nicht abrufbar war — nicht, wenn es schlicht
+    # keine Check-Suite gibt. Der Hinweis soll auf einen Defekt zeigen, nicht
+    # bei jedem Lauf mitlaufen.
+    warn = _ANKER_DEGRADIERT if payload.get("head_seen_unavailable") else ""
 
     # 1) Review-Objekt — traegt eine Commit-Angabe und ist damit eindeutig
     #    einem Stand zuzuordnen.
@@ -214,20 +226,20 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
         _, _, body = max(eligible)
         low = body.lower()
         if MARK_NO_FINDING in low:
-            return REVIEWED, "Codex meldet keinen Befund (Befundlos-Meldung)"
+            return REVIEWED, "Codex meldet keinen Befund (Befundlos-Meldung)" + warn
         if MARK_QUOTA in low:
             return (
                 BLOCKED,
                 "Codex-Kontingent fuer Code-Reviews erschoepft — es wurde NICHT "
                 "geprueft. Das Kontingent haengt am Konto, nicht am Repo; Stand "
-                "im Codex-Dashboard",
+                "im Codex-Dashboard" + warn,
             )
         if MARK_NO_ENVIRONMENT in low:
             return (
                 BLOCKED,
                 "Fuer dieses Repo fehlt eine Codex-Environment — es wurde NICHT "
                 "geprueft. Anzulegen je Repo unter "
-                "chatgpt.com/codex/cloud/settings/environments",
+                "chatgpt.com/codex/cloud/settings/environments" + warn,
             )
         # Nicht in eine bekannte Schublade zwingen. Die Liste der Gruende ist
         # schon einmal von drei auf vier gewachsen.
@@ -235,13 +247,13 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
         return (
             BLOCKED,
             f"Codex hat etwas Unbekanntes gemeldet, woertlich: «{first}» — von "
-            "Hand einordnen, nicht raten",
+            "Hand einordnen, nicht raten" + warn,
         )
 
     return (
         PENDING,
         f"Noch kein Codex-Signal fuer {head_sha[:7] or 'den Head'}. Kein "
-        "Kommentar heisst nicht «geprueft und sauber»",
+        "Kommentar heisst nicht «geprueft und sauber»" + warn,
     )
 
 

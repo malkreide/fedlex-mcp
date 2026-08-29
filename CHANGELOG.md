@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Behoben
 
+- **`checks: read` fehlte — und ein `catch` hat den 403 versteckt.** Dritter
+  Codex-Review am Gate (`fedlex-mcp#66`, Commit `67fbf0684d`). Diesmal kein
+  Denkfehler am Anker, sondern eine fehlende Permission: Ein expliziter
+  `permissions`-Block setzt jeden nicht genannten Scope auf `none`, und
+  `listSuitesForRef` braucht `checks: read`. Der Endpunkt antwortete mit 403,
+  der `catch` machte ein `core.warning` daraus, `head_seen_at` blieb leer — und
+  die Frischepruefung fiel still auf das Committer-Datum zurueck, also in genau
+  die Luecke, die der Anker schliessen soll.
+
+  Die Permission ist nachgetragen. Wichtiger ist der zweite Teil: **Ein
+  geschluckter Fehler sieht aus wie ein gesunder Lauf**, und daran ist der 403
+  ueberhaupt erst unbemerkt geblieben. Schlaegt der Abruf fehl, ist das jetzt
+  `core.error` statt `core.warning`, und der Vermerk geht ins Skript und von
+  dort in den sichtbaren Commit-Status: «Check-Suites nicht lesbar, die Frische
+  haengt nur am Committer-Datum. Fehlt dem Workflow `checks: read`?»
+
+  Der Hinweis erscheint nur bei einem echten Abruf-Fehler — nicht, wenn es
+  schlicht keine Check-Suite gibt, und nicht beim Review-Objekt, das am SHA
+  haengt und vom Anker unabhaengig ist. Eine Warnung, die immer dasteht, liest
+  nach der dritten Woche niemand mehr.
+
 - **Der Anker fuer die Kommentar-Frische darf nie die Laufzeit des Workflows
   sein.** Zweiter Codex-Review am Gate (`swiss-environment-mcp#102`, Commit
   `9cadda7501`), und der Befund ist eine direkte Folge des Fixes davor: Fehlte
