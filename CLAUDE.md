@@ -158,6 +158,49 @@ Eingabe, gegenteiliges Urteil, alles in denselben neun Minuten. Ein sauberer
 Lauf sagt damit etwas über den Lauf, nicht über den Text. Wer sein Häkchen
 daran hängt, hängt es an einen Münzwurf.
 
+### Und dann wechselt die Quelle ihr Format
+
+Am 29.8.2026 hat Codex das Meldeformat umgestellt. Statt Einzelmeldungen führt
+er jetzt **einen** Kommentar je PR und schreibt ihn fort — eine Zeile je Review,
+mit Status und Commit. Wörtlich an `swiss-environment-mcp#104`, Head `5147312`,
+um 06:50:52:
+
+```
+| 📝 **Code Review** | 🔄 **Running** since 2026-08-29T06:50:41Z | `5147312` | Draft marked ready |
+```
+
+und um 06:52:29 derselbe Kommentar, dieselbe `id`, dasselbe `created_at`:
+
+```
+| 📝 **Code Review** | ✅ **Completed** 2026-08-29T06:52:26.201705Z | `5147312` | Draft marked ready |
+```
+
+Der Infokasten sagt neu: «Codex reacts with 👀 while any review is running,
+comments if it has suggestions, and reacts with 👍 once all reviews finish with
+no findings.» Damit fällt die Befundlos-Meldung als Text weg — ein sauberer Lauf
+hinterlässt nur noch eine Reaktion. Wer weiter auf «Didn't find any major
+issues» wartet, wartet auf einen Satz, den niemand mehr schreibt.
+
+Drei Folgen, und die dritte ist die unangenehme:
+
+- **`created_at` ist kein Alter mehr.** Der Kommentar wird bearbeitet, nicht neu
+  geschrieben; sein Erstelldatum steht still, während sein Inhalt weiterläuft.
+  Ein Frischefilter über `created_at` wirft nach dem nächsten Push genau das
+  Signal weg, auf das er wartet.
+- **Die Commit-Spalte ist das bessere Signal.** Sie nennt den geprüften Stand
+  selbst — genauer als jeder Zeitstempel, und in beide Richtungen.
+- **«Running» ist kein Ausfall.** Das Gate hier hat den neuen Kommentar als
+  unbekannten Text eingeordnet und rot gesetzt. Für einen *laufenden* Review ist
+  das falsch; richtig wäre gelb. Dass es überhaupt auffiel, ist die Regel oben
+  in Funktion: Unbekanntes wird zitiert, nicht einsortiert.
+
+Und der Wechsel `Running` → `Completed` ist eine **Bearbeitung**. Ein Workflow
+auf `issue_comment: [created]` sieht ihn nie.
+
+Der Zähler taugt damit noch weniger als vorher: `comments: 1` ist heute meist
+die Summary — und die kann laufend, fertig oder für einen ganz anderen Commit
+sein.
+
 Portfolio-weit nachsehen:
 
 ```
@@ -256,11 +299,17 @@ Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Sca
 einen Commit-Status `codex-gate` auf den PR-Head und wird nur grün, wenn Codex
 diesen Head nachweislich geprüft hat — Review-Objekt ODER Befundlos-Meldung.
 Kontingent- und Environment-Meldung lassen es **rot**: Beide heissen
-ausdrücklich «nicht geprüft», und ohne Handlung ändert sich daran nichts. Ein
-Draft steht auf **gelb** — er ist ohnehin nicht mergebar, und ein Repo, in dem
-jeder Draft ein rotes Kreuz trägt, bringt seinen Leuten bei, rote Kreuze zu
-übersehen. Das Gate hat sich diese Lektion selbst erteilt: Seine ersten beiden
-Läufe färbten zwei frische Draft-PRs rot.
+ausdrücklich «nicht geprüft», und ohne Handlung ändert sich daran nichts. Seit
+dem Formatwechsel vom 29.8. zählt zusätzlich die Summary-Tabelle: `Completed`
+für den Head ist ein Nachweis, `Running` hält auf **gelb**, ein drittes
+Statuswort wird zitiert statt geraten. Ihre Frische hängt an der Commit-Spalte,
+nicht an `created_at` — Gründe oben. Mehrere Zeilen zählen einzeln: Solange eine
+läuft, ist der Head nicht fertig geprüft. Zusammengeführt wird nach Schwere: Was
+ausdrücklich «nicht geprüft» sagt, schlägt jede Fertigmeldung. Ein Draft steht
+auf **gelb** — er ist ohnehin nicht mergebar, und ein Repo, in dem jeder Draft
+ein rotes Kreuz trägt, bringt seinen Leuten bei, rote Kreuze zu übersehen. Das
+Gate hat sich diese Lektion selbst erteilt: Seine ersten beiden Läufe färbten
+zwei frische Draft-PRs rot.
 
 Bewusst kein Timer. Ein Gate, das nach N Minuten von selbst grün wird,
 behauptet eine Prüfung, die es nicht gesehen hat — am 21./22.8. war das

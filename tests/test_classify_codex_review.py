@@ -553,3 +553,145 @@ def test_review_objekt_braucht_die_warnung_nicht():
         )
     )
     assert "checks: read" not in reason
+
+
+# --- Codex hat am 29.8.2026 das Meldeformat gewechselt ------------------------
+#
+# Statt einer Befundlos-Meldung im Fliesstext schreibt Codex jetzt EINEN
+# Kommentar, den es in Ort und Stelle fortschreibt: eine Tabelle je Review, mit
+# Status und Commit. Woertlich beobachtet an swiss-environment-mcp#104, Head
+# `5147312` — erst
+#
+#     | 📝 **Code Review** | 🔄 **Running** since 2026-08-29T06:50:41… | `5147312` | …
+#
+# um 06:50:52, dann um 06:52:29 derselbe Kommentar mit
+#
+#     | 📝 **Code Review** | ✅ **Completed** 2026-08-29T06:52:26.201705Z | `5147312` | …
+#
+# Der Infokasten sagt dazu neu: «Codex reacts with 👀 while any review is
+# running, comments if it has suggestions, and reacts with 👍 once all reviews
+# finish with no findings.» Ein befundloser Lauf hinterlaesst danach gar keinen
+# Text mehr, sondern eine Reaktion — die alte Befundlos-Meldung faellt als
+# Signal weg. Ohne die Tabelle bliebe jeder saubere PR ungruen; das Gate hat
+# den neuen Kommentar an #104 als unbekannten Text eingeordnet und rot gesetzt.
+#
+# Die Tabelle ist dafuer das bessere Signal als jeder Zeitstempel: Sie nennt den
+# geprueften Commit selbst. Deshalb haengt die Frische einer Summary an ihrer
+# Commit-Spalte und nicht an `created_at` — letzteres steht ohnehin still,
+# waehrend der Kommentar fortgeschrieben wird.
+
+SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
+
+
+def _summary(status_cell, commit="b165c90", name="📝 **Code Review**", marker=True):
+    kopf = SUMMARY_MARKER + "\n\n" if marker else ""
+    return (
+        f"{kopf}## Codex Review Summary\n\n"
+        "This comment shows the latest Codex review activity on this pull request.\n\n"
+        "| Review | Status | Commit | Review trigger |\n"
+        "| --- | --- | --- | --- |\n"
+        f"| {name} | {status_cell} | `{commit}` | Draft marked ready |\n\n"
+        " ℹ️ About Codex in GitHub\n<br/>\n\n"
+        "[Your team has set up Codex to review pull requests in this repo]"
+        "(https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered "
+        "when you\n- Open a pull request for review\n- Mark a draft as ready\n"
+        '- Comment "@codex review" or "@codex security review".\n\n'
+        "Codex reacts with 👀 while any review is running, comments if it has "
+        "suggestions, and reacts with 👍 once all reviews finish with no findings.\n"
+    )
+
+
+FERTIG = "✅ **Completed** 2026-08-29T06:52:26.201705Z"
+LAEUFT = "🔄 **Running** since 2026-08-29T06:50:41Z"
+
+
+def test_summary_completed_fuer_den_head_zaehlt_als_geprueft():
+    state, reason = classify(_payload(comments=[_comment(_summary(FERTIG))]))
+    assert state == REVIEWED
+    assert "Summary" in reason
+
+
+def test_summary_running_ist_pending_und_kein_ausfall():
+    # Ein laufender Review ist kein erschoepftes Kontingent. Genau diese
+    # Verwechslung hat das Gate an #104 rot gemacht.
+    state, _ = classify(_payload(comments=[_comment(_summary(LAEUFT))]))
+    assert state == PENDING
+
+
+def test_summary_wird_auch_ohne_html_marker_erkannt():
+    # Der rohe API-Body traegt den Marker; manche Zwischenschichten schneiden
+    # HTML-Kommentare weg. Die Ueberschrift traegt dann allein.
+    state, _ = classify(_payload(comments=[_comment(_summary(FERTIG, marker=False))]))
+    assert state == REVIEWED
+
+
+def test_summary_fuer_einen_anderen_commit_zaehlt_nicht():
+    state, _ = classify(_payload(comments=[_comment(_summary(FERTIG, commit="deadbee"))]))
+    assert state == PENDING
+
+
+def test_summary_zaehlt_trotz_alten_erstellungsdatums():
+    # Der Kommentar wird fortgeschrieben: `created_at` bleibt beim ERSTEN
+    # Review stehen, waehrend die Tabelle den jetzigen Head meldet. Wer hier
+    # nach Zeit filtert, wirft das einzige gueltige Signal weg.
+    state, _ = classify(_payload(comments=[_comment(_summary(FERTIG), created_at=T_BEFORE)]))
+    assert state == REVIEWED
+
+
+def test_summary_mit_unbekanntem_status_wird_woertlich_zitiert():
+    state, reason = classify(_payload(comments=[_comment(_summary("💥 **Errored** irgendwas"))]))
+    assert state == BLOCKED
+    assert "Errored" in reason
+
+
+def test_summary_ein_laufender_review_haelt_die_fertigen_auf():
+    body = _summary(FERTIG).replace(
+        "| Draft marked ready |\n",
+        "| Draft marked ready |\n| 🔒 **Security Review** | "
+        + LAEUFT
+        + " | `b165c90` | Draft marked ready |\n",
+    )
+    state, _ = classify(_payload(comments=[_comment(body)]))
+    assert state == PENDING
+
+
+def test_summary_verdeckt_keine_kontingent_meldung():
+    # Zusammengefuehrt wird nach Schwere, nicht nach Reihenfolge: Was
+    # ausdruecklich «nicht geprueft» sagt, darf kein gruenes Haekchen bekommen.
+    state, _ = classify(
+        _payload(
+            comments=[
+                _comment(_summary(FERTIG)),
+                _comment("You have reached your Codex usage limits for code reviews."),
+            ]
+        )
+    )
+    assert state == BLOCKED
+
+
+def test_gegenprobe_ohne_commit_spalte_waere_jede_summary_gruen():
+    # Haengt die Frische wirklich an der Commit-Spalte? Dann muss eine Summary,
+    # die einen fremden Commit meldet, das Gate NICHT gruen machen — und eine
+    # mit dem Head sehr wohl.
+    fremd, _ = classify(_payload(comments=[_comment(_summary(FERTIG, commit="0000000"))]))
+    eigen, _ = classify(_payload(comments=[_comment(_summary(FERTIG))]))
+    assert (fremd, eigen) == (PENDING, REVIEWED)
+
+
+# --- Der Auslöser muss zum fortgeschriebenen Kommentar passen -----------------
+
+
+def test_gate_hoert_auch_auf_bearbeitete_kommentare():
+    # Seit dem 29.8.2026 wechselt das Signal von «Running» auf «Completed»
+    # durch eine BEARBEITUNG desselben Kommentars, nicht durch einen neuen.
+    # `issue_comment: [created]` allein sieht diesen Wechsel nie. Der Poll-Lauf
+    # faengt ihn nur, solange sein Zeitfenster laeuft — danach bliebe das Gate
+    # auf `pending` stehen, obwohl Codex laengst fertig ist.
+    yml = (Path(__file__).resolve().parents[1] / ".github/workflows/codex-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    block = yml.split("issue_comment:", 1)[1].split("\n\n", 1)[0]
+    assert "edited" in block, (
+        "Der Wechsel Running -> Completed ist eine Bearbeitung; ohne `edited` "
+        "sieht das Gate ihn nach Ablauf des Poll-Fensters nicht mehr"
+    )

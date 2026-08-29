@@ -43,11 +43,18 @@ on:
   pull_request:
     branches: [main]
     types: [opened, reopened, ready_for_review, synchronize, converted_to_draft]
-  # Codex meldet sich als gewoehnlicher Issue-Kommentar (Befundlos-,
-  # Kontingent-, Environment-Meldung) oder als Review-Objekt. Beide Wege
-  # muessen den Status nachziehen koennen.
+  # Codex meldet sich als gewoehnlicher Issue-Kommentar (Kontingent-,
+  # Environment-Meldung, frueher auch die Befundlos-Meldung), als
+  # fortgeschriebene Summary-Tabelle oder als Review-Objekt. Alle Wege muessen
+  # den Status nachziehen koennen.
+  #
+  # `edited` ist seit dem 29.8.2026 kein Luxus: Die Summary wechselt von
+  # «Running» auf «Completed», indem Codex DENSELBEN Kommentar bearbeitet. Mit
+  # `created` allein kaeme dieses Signal nie an — der Poll-Lauf unten faengt es
+  # nur, solange sein Zeitfenster laeuft, und danach haenge das Gate auf
+  # `pending`, obwohl der Review fertig ist.
   issue_comment:
-    types: [created]
+    types: [created, edited]
   pull_request_review:
     types: [submitted]
 

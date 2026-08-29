@@ -52,6 +52,32 @@ verschiedene Abfragen; wer nur eine nimmt, uebersieht den Rest. `comments: 1`
 kann Befundlos-, Kontingent- ODER Environment-Meldung sein — drei
 gegensaetzliche Bedeutungen unter derselben Zahl.
 
+DIE SUMMARY-TABELLE (seit 29.8.2026)
+------------------------------------
+Codex fuehrt seither EINEN Kommentar je PR und schreibt ihn fort — eine Zeile
+je Review, mit Status und Commit. Woertlich beobachtet an
+swiss-environment-mcp#104, Head `5147312`: um 06:50:52
+
+    | 📝 **Code Review** | 🔄 **Running** since … | `5147312` | Draft marked ready |
+
+und um 06:52:29 derselbe Kommentar mit `✅ **Completed** …`. Der Infokasten sagt
+neu: «Codex reacts with 👀 while any review is running, comments if it has
+suggestions, and reacts with 👍 once all reviews finish with no findings.» Ein
+befundloser Lauf hinterlaesst danach ueberhaupt keinen Text mehr, sondern eine
+Reaktion — die Befundlos-Meldung faellt als Signal weg. Ohne die Tabelle bliebe
+jeder saubere PR ungruen; an #104 hat das Gate den neuen Kommentar als
+unbekannten Text eingeordnet und rot gesetzt, was fuer einen LAUFENDEN Review
+schlicht falsch ist.
+
+Die Tabelle ist dabei das bessere Signal als jeder Zeitstempel: Sie nennt den
+geprueften Commit selbst. Die Frische einer Summary haengt deshalb an ihrer
+Commit-Spalte, nicht an `created_at` — das steht still, waehrend der Kommentar
+fortgeschrieben wird, und wuerde nach dem naechsten Push das einzige gueltige
+Signal wegfiltern.
+
+Zusammengefuehrt wird nach Schwere: Was ausdruecklich «nicht geprueft» sagt,
+schlaegt jede Fertigmeldung. Das Gate darf lieber warten als gruen luegen.
+
 FRISCHE
 -------
 Ein Review zaehlt nur fuer den Head, den er gesehen hat. Review-Objekte tragen
@@ -115,6 +141,21 @@ MARK_NO_FINDING = "didn't find any major issues"
 MARK_QUOTA = "usage limits for code reviews"
 MARK_NO_ENVIRONMENT = "create an environment for this repo"
 
+# Der fortgeschriebene Sammelkommentar. Der HTML-Marker ist das maschinell
+# gemeinte Merkmal und steht im rohen API-Body; manche Zwischenschichten
+# schneiden HTML-Kommentare weg, deshalb traegt die Ueberschrift als Rueckfall.
+MARK_SUMMARY_HTML = "<!-- codex-pull-request-review-summary -->"
+MARK_SUMMARY_HEADING = "## codex review summary"
+
+# Die beiden Statuswoerter, die am 29.8.2026 beobachtet wurden. Bewusst nur
+# diese zwei: Ein drittes wird woertlich zitiert statt geraten — dieselbe Regel
+# wie beim unbekannten Kommentartext, und aus demselben Grund.
+SUMMARY_DONE = "completed"
+SUMMARY_RUNNING = "running"
+
+# Rangfolge beim Zusammenfuehren mehrerer Signale. Hoeher schlaegt niedriger.
+_SEVERITY = {REVIEWED: 0, PENDING: 1, BLOCKED: 2}
+
 # Rangplatz fuer Kommentare ohne lesbaren Zeitstempel: aelter als alles
 # Datierte, damit sie keinen datierten Kommentar ueberstimmen.
 _EPOCH = datetime.min.replace(tzinfo=UTC)
@@ -135,6 +176,76 @@ def _parse_ts(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _is_summary(body: str) -> bool:
+    low = body.lower()
+    return MARK_SUMMARY_HTML in low or MARK_SUMMARY_HEADING in low
+
+
+def _looks_like_sha(text: str) -> bool:
+    # Mindestens sieben Hex-Zeichen. Die Laenge haelt die Kopfzeile («Commit»),
+    # die Trennzeile («---») und einen zufaelligen Praefix-Treffer draussen.
+    return len(text) >= 7 and all(c in "0123456789abcdef" for c in text.lower())
+
+
+def _bold_word(cell: str) -> str:
+    """Das fettgesetzte Statuswort einer Tabellenzelle, klein geschrieben."""
+    start = cell.find("**")
+    if start < 0:
+        return ""
+    end = cell.find("**", start + 2)
+    if end < 0:
+        return ""
+    return cell[start + 2 : end].strip().lower()
+
+
+def _summary_rows(body: str) -> list[tuple[str, str, str]]:
+    """(Commit, Statuswort, Zelle woertlich) je Zeile der Summary-Tabelle."""
+    rows: list[tuple[str, str, str]] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        commit = cells[2].strip("` ")
+        if not _looks_like_sha(commit):
+            continue  # Kopf- und Trennzeile fallen genau hier heraus
+        rows.append((commit.lower(), _bold_word(cells[1]), cells[1]))
+    return rows
+
+
+def _verdict_from_summary(
+    rows: list[tuple[str, str, str]], head_sha: str
+) -> tuple[str, str] | None:
+    """Urteil aus den Tabellenzeilen, die DIESEN Head nennen."""
+    head = head_sha.lower()
+    mine = [r for r in rows if head and (head.startswith(r[0]) or r[0].startswith(head))]
+    if not mine:
+        return None
+    kurz = head[:7] or "den Head"
+    unbekannt = [r for r in mine if r[1] not in (SUMMARY_DONE, SUMMARY_RUNNING)]
+    if unbekannt:
+        zelle = unbekannt[0][2].replace("\n", " ")[:200]
+        return (
+            BLOCKED,
+            f"Codex-Summary meldet fuer {kurz} einen unbekannten Status, "
+            f"woertlich: «{zelle}» — von Hand einordnen, nicht raten",
+        )
+    laufend = [r for r in mine if r[1] == SUMMARY_RUNNING]
+    if laufend:
+        # «once ALL reviews finish»: Solange eine Zeile laeuft, ist der Head
+        # nicht fertig geprueft — auch wenn eine andere schon Completed meldet.
+        return (
+            PENDING,
+            f"Codex-Summary: {len(laufend)} von {len(mine)} Review(s) fuer {kurz} laufen noch",
+        )
+    return (
+        REVIEWED,
+        f"Codex-Summary meldet {len(mine)} abgeschlossene(n) Review(s) fuer {kurz}",
+    )
 
 
 def _is_codex(author: Any) -> bool:
@@ -200,10 +311,11 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
             f"(state={review.get('state', '?')})",
         )
 
-    # 2) Gewoehnliche Issue-Kommentare — drei bekannte Bedeutungen, und eine
-    #    vierte Moeglichkeit, die woertlich weitergereicht wird.
-    #
-    #    Es gewinnt der NEUESTE, nicht der erste Treffer (Codex-Review vom
+    # 2) Kommentare. Zwei Sorten, und sie werden verschieden datiert: Die
+    #    fortgeschriebene Summary traegt ihren Commit selbst, die uebrigen
+    #    Meldungen nur ein `created_at`.
+    summary_rows: list[tuple[str, str, str]] = []
+    #    Es gewinnt der NEUESTE Treffer, nicht der erste (Codex-Review vom
     #    28.8.2026, P2). `listComments` liefert chronologisch: Kam zuerst die
     #    Kontingent-Meldung und danach — nach einem Retry auf unveraendertem
     #    Head — die Befundlos-Meldung, blieb das Gate sonst rot, obwohl Codex
@@ -214,46 +326,77 @@ def classify(payload: dict[str, Any]) -> tuple[str, str]:
     for i, comment in enumerate(payload.get("comments") or []):
         if not _is_codex(comment.get("user")):
             continue
+        body = (comment.get("body") or "").strip()
+        if _is_summary(body):
+            # Kein Zeitfilter: `created_at` bleibt beim ersten Review stehen,
+            # waehrend der Kommentar fortgeschrieben wird. Die Commit-Spalte
+            # sagt genauer, was geprueft wurde, als jeder Zeitstempel.
+            summary_rows.extend(_summary_rows(body))
+            continue
         made = _parse_ts(comment.get("created_at"))
         if head_time and made and made < head_time:
             continue  # aelter als der jetzige Head — hat ihn nicht gesehen
         # Ohne Zeitstempel ans Ende der Rangfolge: Ein Kommentar, dessen Alter
         # unbekannt ist, darf keinen datierten ueberstimmen. Die Reihenfolge aus
         # der API bleibt als Tiebreak.
-        eligible.append((made or _EPOCH, i, (comment.get("body") or "").strip()))
+        eligible.append((made or _EPOCH, i, body))
 
-    if eligible:
-        _, _, body = max(eligible)
-        low = body.lower()
-        if MARK_NO_FINDING in low:
-            return REVIEWED, "Codex meldet keinen Befund (Befundlos-Meldung)" + warn
-        if MARK_QUOTA in low:
-            return (
-                BLOCKED,
-                "Codex-Kontingent fuer Code-Reviews erschoepft — es wurde NICHT "
-                "geprueft. Das Kontingent haengt am Konto, nicht am Repo; Stand "
-                "im Codex-Dashboard" + warn,
-            )
-        if MARK_NO_ENVIRONMENT in low:
-            return (
-                BLOCKED,
-                "Fuer dieses Repo fehlt eine Codex-Environment — es wurde NICHT "
-                "geprueft. Anzulegen je Repo unter "
-                "chatgpt.com/codex/cloud/settings/environments" + warn,
-            )
-        # Nicht in eine bekannte Schublade zwingen. Die Liste der Gruende ist
-        # schon einmal von drei auf vier gewachsen.
-        first = body.replace("\n", " ")[:200]
-        return (
-            BLOCKED,
-            f"Codex hat etwas Unbekanntes gemeldet, woertlich: «{first}» — von "
-            "Hand einordnen, nicht raten" + warn,
+    verdicts = [
+        v
+        for v in (
+            _verdict_from_summary(summary_rows, head_sha),
+            _verdict_from_comments(eligible),
         )
+        if v
+    ]
+    if verdicts:
+        # Nach Schwere, nicht nach Reihenfolge: Eine Meldung, die ausdruecklich
+        # «nicht geprueft» sagt, schlaegt jede Fertigmeldung. Lieber warten als
+        # gruen luegen — das ist die ganze These dieses Gates.
+        state, reason = max(verdicts, key=lambda v: _SEVERITY[v[0]])
+        andere = [v for v in verdicts if v[0] != state]
+        if andere:
+            reason += f" — daneben: {andere[0][1]}"
+        return state, reason + warn
 
     return (
         PENDING,
         f"Noch kein Codex-Signal fuer {head_sha[:7] or 'den Head'}. Kein "
         "Kommentar heisst nicht «geprueft und sauber»" + warn,
+    )
+
+
+def _verdict_from_comments(
+    eligible: list[tuple[datetime, int, str]],
+) -> tuple[str, str] | None:
+    """Urteil aus den uebrigen Codex-Kommentaren — der neueste gewinnt."""
+    if not eligible:
+        return None
+    _, _, body = max(eligible)
+    low = body.lower()
+    if MARK_NO_FINDING in low:
+        return REVIEWED, "Codex meldet keinen Befund (Befundlos-Meldung)"
+    if MARK_QUOTA in low:
+        return (
+            BLOCKED,
+            "Codex-Kontingent fuer Code-Reviews erschoepft — es wurde NICHT "
+            "geprueft. Das Kontingent haengt am Konto, nicht am Repo; Stand "
+            "im Codex-Dashboard",
+        )
+    if MARK_NO_ENVIRONMENT in low:
+        return (
+            BLOCKED,
+            "Fuer dieses Repo fehlt eine Codex-Environment — es wurde NICHT "
+            "geprueft. Anzulegen je Repo unter "
+            "chatgpt.com/codex/cloud/settings/environments",
+        )
+    # Nicht in eine bekannte Schublade zwingen. Die Liste der Gruende ist
+    # schon einmal von drei auf vier gewachsen.
+    first = body.replace("\n", " ")[:200]
+    return (
+        BLOCKED,
+        f"Codex hat etwas Unbekanntes gemeldet, woertlich: «{first}» — von "
+        "Hand einordnen, nicht raten",
     )
 
 

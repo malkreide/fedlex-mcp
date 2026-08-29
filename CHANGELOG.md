@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Behoben
 
+- **Codex hat sein Meldeformat gewechselt — das Gate ordnete es als Ausfall
+  ein.** Seit dem 29.8.2026 führt Codex **einen** Kommentar je PR und schreibt
+  ihn fort: eine Tabellenzeile je Review, mit Status und Commit. Beobachtet an
+  `swiss-environment-mcp#104`, Head `5147312` — um 06:50:52 `🔄 **Running**`, um
+  06:52:29 derselbe Kommentar mit `✅ **Completed**`. Die Befundlos-Meldung
+  entfällt dabei als Text: Ein sauberer Lauf hinterlässt nur noch eine
+  👍-Reaktion. Das Gate kannte diesen Text nicht, zitierte ihn wörtlich und
+  setzte `codex-gate` auf **rot** — für einen *laufenden* Review falsch, und für
+  jeden künftigen befundlosen PR wäre es dauerhaft rot geblieben. Neu:
+
+  - Die Summary wird am HTML-Marker `codex-pull-request-review-summary` erkannt,
+    ersatzweise an ihrer Überschrift (manche Zwischenschichten schneiden
+    HTML-Kommentare weg).
+  - `Completed` für den Head zählt als Nachweis, `Running` als `pending`, ein
+    drittes Statuswort wird weiterhin wörtlich zitiert statt geraten.
+  - Ihre Frische hängt an der **Commit-Spalte**, nicht an `created_at`: Der
+    Kommentar wird bearbeitet, sein Erstelldatum steht still — ein Zeitfilter
+    würde nach dem nächsten Push das einzige gültige Signal wegwerfen.
+  - Mehrere Zeilen zählen einzeln; solange eine läuft, ist der Head nicht fertig
+    geprüft («once *all* reviews finish»).
+  - Zusammengeführt wird nach Schwere: Was ausdrücklich «nicht geprüft» sagt,
+    schlägt jede Fertigmeldung. Lieber warten als grün lügen.
+  - `issue_comment: [created, edited]` — der Wechsel `Running` → `Completed` ist
+    eine *Bearbeitung*; mit `created` allein käme das Signal nach Ablauf des
+    Poll-Fensters nie an.
+
+  Neun Tests, jede Zusicherung einzeln gegengeprobt; die Einordnung steht
+  weiterhin in `scripts/classify_codex_review.py` neben ihrem Test, nicht im
+  YAML.
+
 - **`checks: read` fehlte — und ein `catch` hat den 403 versteckt.** Dritter
   Codex-Review am Gate (`fedlex-mcp#66`, Commit `67fbf0684d`). Diesmal kein
   Denkfehler am Anker, sondern eine fehlende Permission: Ein expliziter
