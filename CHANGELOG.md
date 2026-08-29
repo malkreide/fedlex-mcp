@@ -35,9 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     eine *Bearbeitung*; mit `created` allein käme das Signal nach Ablauf des
     Poll-Fensters nie an.
 
-  Neun Tests, jede Zusicherung einzeln gegengeprobt; die Einordnung steht
-  weiterhin in `scripts/classify_codex_review.py` neben ihrem Test, nicht im
-  YAML.
+  Elf Tests, jede Zusicherung einzeln gegengeprobt. Die Fixture ist der
+  **aufgezeichnete** Kommentar aus dem Webhook zu `fedlex-mcp#67` vom 29.8.2026,
+  06:51:36 UTC — mit `<details>`-Hülle und `<relative-time>` in der Statuszelle.
+  Die zuerst über die MCP-Abfrage gelesene Fassung war HTML-bereinigt; wer nur
+  die nachbaut, prüft seine eigene Annahme statt der Quelle. Beide Formen sind
+  abgedeckt. Die Einordnung steht weiterhin in
+  `scripts/classify_codex_review.py` neben ihrem Test, nicht im YAML.
 
 - **`checks: read` fehlte — und ein `catch` hat den 403 versteckt.** Dritter
   Codex-Review am Gate (`fedlex-mcp#66`, Commit `67fbf0684d`). Diesmal kein

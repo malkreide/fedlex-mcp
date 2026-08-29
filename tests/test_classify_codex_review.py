@@ -583,26 +583,41 @@ def test_review_objekt_braucht_die_warnung_nicht():
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
 
 
-def _summary(status_cell, commit="b165c90", name="📝 **Code Review**", marker=True):
+def _summary(status_cell, commit="b165c90", name="\U0001f4dd **Code Review**", marker=True):
+    """Der Sammelkommentar, aufgezeichnet statt nachgebaut.
+
+    Woertlich aus dem Webhook zu `fedlex-mcp#67` vom 29.8.2026, 06:51:36 UTC —
+    inklusive `<details>`-Huelle und `<relative-time>`-Element in der
+    Statuszelle. Die Fassung, die ueber die MCP-Abfrage kam, war davon
+    HTML-bereinigt; wer nur die nachbaut, prueft seine eigene Annahme statt der
+    Quelle. Beide Formen muessen durchgehen, siehe
+    `test_summary_auch_in_der_html_bereinigten_fassung`.
+    """
     kopf = SUMMARY_MARKER + "\n\n" if marker else ""
     return (
         f"{kopf}## Codex Review Summary\n\n"
         "This comment shows the latest Codex review activity on this pull request.\n\n"
         "| Review | Status | Commit | Review trigger |\n"
         "| --- | --- | --- | --- |\n"
-        f"| {name} | {status_cell} | `{commit}` | Draft marked ready |\n\n"
-        " ℹ️ About Codex in GitHub\n<br/>\n\n"
+        f"| {name} | {status_cell} | `{commit}` | Draft marked ready |\n\n\n\n"
+        "<details> <summary>\u2139\ufe0f About Codex in GitHub</summary>\n<br/>\n\n"
         "[Your team has set up Codex to review pull requests in this repo]"
         "(https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered "
         "when you\n- Open a pull request for review\n- Mark a draft as ready\n"
         '- Comment "@codex review" or "@codex security review".\n\n'
-        "Codex reacts with 👀 while any review is running, comments if it has "
-        "suggestions, and reacts with 👍 once all reviews finish with no findings.\n"
+        "Codex reacts with \U0001f440 while any review is running, comments if it has "
+        "suggestions, and reacts with \U0001f44d once all reviews finish with no "
+        "findings.\n\n</details>"
     )
 
 
-FERTIG = "✅ **Completed** 2026-08-29T06:52:26.201705Z"
-LAEUFT = "🔄 **Running** since 2026-08-29T06:50:41Z"
+def _zeit(iso):
+    """Die Statuszelle traegt den Zeitpunkt als HTML-Element, nicht als Text."""
+    return f'<relative-time datetime="{iso}">{iso}</relative-time>'
+
+
+FERTIG = "\u2705 **Completed** " + _zeit("2026-08-29T06:52:26.201705Z")
+LAEUFT = "\U0001f504 **Running** since " + _zeit("2026-08-29T06:51:31.539632Z")
 
 
 def test_summary_completed_fuer_den_head_zaehlt_als_geprueft():
@@ -616,6 +631,20 @@ def test_summary_running_ist_pending_und_kein_ausfall():
     # Verwechslung hat das Gate an #104 rot gemacht.
     state, _ = classify(_payload(comments=[_comment(_summary(LAEUFT))]))
     assert state == PENDING
+
+
+def test_summary_auch_in_der_html_bereinigten_fassung():
+    # Ueber die MCP-Abfrage kam derselbe Kommentar ohne `<relative-time>` und
+    # ohne `<details>`. Welche Zwischenschicht was wegschneidet, ist nicht
+    # unsere Sache — die Einordnung darf an keiner der beiden Formen haengen.
+    bereinigt = _summary(FERTIG).replace(
+        _zeit("2026-08-29T06:52:26.201705Z"), "2026-08-29T06:52:26.201705Z"
+    )
+    bereinigt = bereinigt.replace("<details> <summary>", " ").replace("</summary>", "")
+    bereinigt = bereinigt.replace("</details>", "")
+    assert "<relative-time" not in bereinigt and "<details" not in bereinigt
+    state, _ = classify(_payload(comments=[_comment(bereinigt)]))
+    assert state == REVIEWED
 
 
 def test_summary_wird_auch_ohne_html_marker_erkannt():
