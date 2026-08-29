@@ -55,7 +55,7 @@ dev = [
     # driften auseinander, und die CI merkt es nicht, weil der zweite Schritt
     # den ersten überschreibt. Beim Anheben: Version ändern, `ruff format`
     # einmal über src/ tests/ scripts/ laufen lassen, Ergebnis mitcommitten.
-    "ruff==0.16.3",
+    "ruff==0.16.4",
 ]
 # Optional OpenTelemetry tracing (OBS-006). Enabled at runtime only when
 # OTEL_EXPORTER_OTLP_ENDPOINT is set; otherwise a complete no-op.
