@@ -98,7 +98,7 @@ jobs:
 
       - name: Pollen, bis Codex gesprochen hat
         id: gate
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           POLL_MAX_SECONDS: "900"
           POLL_INTERVAL_SECONDS: "30"
