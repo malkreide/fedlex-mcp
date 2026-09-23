@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Das Codex-Gate ist entfernt.** Weg sind `.github/workflows/codex-gate.yml`,
+  `scripts/classify_codex_review.py` und `tests/test_classify_codex_review.py`;
+  dazu der Checklisten-Abschnitt im PR-Template, der Abschnitt «Wenn Codex gar
+  nicht erst hinsieht» (101 Zeilen), der Abschnitt «Und dann wechselt die
+  Quelle ihr Format» (71 Zeilen) und der Gate-Block in Teil 2 (29 Zeilen).
+
+  **Branch Protection pruefen.** Das Gate trug einen Commit-Status
+  `codex-gate` auf dem PR-Head. `CLAUDE.md` hielt zum 28.8.2026 fest, dass
+  `main` hier `protected: false` war — in dem Fall gibt es nichts
+  nachzufuehren. Am 18.9.2026 bekamen laut der Dokumentation in `srgssr-mcp`
+  aber alle 43 Portfolio-Repos Branch Protection; ob `codex-gate` dabei als
+  required Kontext eingetragen wurde, ist von hier aus nicht lesbar (der
+  Agent-Proxy sperrt die Einstellung mit HTTP 403). Steht er dort, muss er
+  von Hand weg — ein required Kontext ohne Berichterstatter haelt jeden PR auf.
+
+  Stehen bleiben die Herkunftsangabe in `tests/test_retry_policy.py`, die
+  Branch-Namen der Zwei-Agenten-Anekdote und die bisherigen Eintraege hier.
+
 ### Behoben
 
 - **Codex hat sein Meldeformat gewechselt — das Gate ordnete es als Ausfall
