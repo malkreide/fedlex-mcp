@@ -5,6 +5,10 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
     open-pull-requests-limit: 5
 
   # GitHub Actions
@@ -12,3 +16,7 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
