@@ -509,7 +509,7 @@ the spec changelog between the two revisions, verify the server still behaves,
 then move the constant, this section, `README.de.md` and
 [`CHANGELOG.md`](CHANGELOG.md) together.
 
-Two consequences of the modern revision are visible in this server:
+Four consequences of the modern revision are visible in this server:
 
 - **CORS names the routing headers.** `Mcp-Method`, `Mcp-Name` and
   `Mcp-Protocol-Version` ride on every streamable-HTTP request, and a browser
@@ -520,6 +520,22 @@ Two consequences of the modern revision are visible in this server:
   `ttlMs` 300000 and `cacheScope` `public` (`CACHE_HINTS`). `resources/read`
   deliberately does not: it returns federal law, and a client must not treat a
   repealed enactment as fresh for five minutes.
+- **No log notifications.** The logging capability is deprecated as of
+  `2026-07-28` (SEP-2577). Up to v2.0.1 every tool sent `notifications/message`
+  via `ctx.info()`/`ctx.error()` — on handshake connections without ever
+  declaring the `logging` capability, on modern ones as a deprecated call the
+  SDK dropped. Observability now sits with the operator (structlog on stderr,
+  optional OpenTelemetry); a failure reaches the caller in the tool result
+  itself (`match_type: "error"`).
+- **`serverInfo` carries the package version.** In `2026-07-28` the identity is
+  stamped into the `_meta` of every response, not sent once at `initialize`.
+  Up to v2.0.1 its `version` was an empty string.
+
+Both eras are exercised over the wire in
+[`tests/test_modern_era.py`](tests/test_modern_era.py): a session-less
+`server/discover` and `tools/call` through the assembled ASGI stack, and a tool
+call in each era that must produce neither a log notification nor an SDK
+deprecation warning.
 
 ---
 
