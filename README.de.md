@@ -500,10 +500,13 @@ Vier Folgen der modernen Revision sind in diesem Server sichtbar:
   Identitaet im `_meta` jeder Antwort, nicht einmalig im `initialize`. Bis
   v2.0.1 war ihre `version` ein Leerstring.
 
-**Tool-Fehler tragen `isError: true`.** Die Spec trennt Protokollfehler
-(unbekanntes Tool, Argumente verletzen das Schema: JSON-RPC-Fehler, beantwortet
-vom SDK) von Ausfuehrungsfehlern (Fedlex oder LINDAS nicht erreichbar, Antwort
-kein JSON: Tool-Resultat mit `isError: true`). Bis v2.0.1 kamen letztere mit
+**Tool-Fehler tragen `isError: true`.** Einen Ausfuehrungsfehler (Fedlex oder
+LINDAS nicht erreichbar, Antwort kein JSON) meldet die Spec als Tool-Resultat
+mit `isError: true`, nicht als JSON-RPC-Fehler. Seit `2025-11-25` zaehlen auch
+Argumente, die das Eingabeschema verletzen, dazu, damit das Modell seine Eingabe
+korrigieren kann; die beantwortet das SDK selbst, bevor das Tool laeuft, ohne
+Envelope — gemessen in beiden Aeren, ebenso fuer einen unbekannten Tool-Namen.
+Bis v2.0.1 kamen die eigenen Fehlschlaege des Servers mit
 `isError: false`, nur `match_type: "error"` im Envelope sagte es. Der Envelope
 reist weiter als `structuredContent`; «nichts gefunden» (`match_type: "none"`)
 ist eine gueltige Antwort und traegt das Flag *nicht*. Jedes registrierte Tool
