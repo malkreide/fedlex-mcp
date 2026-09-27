@@ -37,6 +37,7 @@ daneben der `initialize`-Handshake bis 2025-11-25 fuer bestehende Clients. Die
 Aushandlung liegt im mcp-SDK; siehe README-Sektion "MCP Protocol Version".
 """
 
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -48,12 +49,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 import structlog
 from mcp.server.caching import CacheHint
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -355,7 +357,7 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[AppContext]:
 # Die Beobachtbarkeit liegt deshalb dort, wo die Spec sie jetzt sieht: beim
 # Betreiber (structlog auf stderr, OBS-003; optional OpenTelemetry, OBS-006).
 # Der Aufrufer erfaehrt einen Fehlschlag aus dem Tool-Resultat selbst
-# (`match_type: "error"` plus maskierte Meldung) und nicht aus einem
+# (`isError: true`, `match_type: "error"` plus maskierte Meldung) und nicht aus einem
 # Seitenkanal, den er abonnieren muesste.
 def _trace(tool: str, **fields: object) -> None:
     """Loggt einen Tool-Aufruf strukturiert (OBS-003), betreiberseitig."""
@@ -721,11 +723,68 @@ class SearchTreatiesInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tool-Registrierung: Ausführungsfehler als `isError: true` (OBS-001)
+# ---------------------------------------------------------------------------
+#
+# Die Spec trennt zwei Fehlerarten. Ein Protokollfehler (unbekanntes Tool,
+# Schema verletzt) ist eine JSON-RPC-Fehlerantwort; die liefert das SDK selbst.
+# Ein AUSFÜHRUNGSFEHLER — Fedlex oder LINDAS nicht erreichbar, Antwort kein
+# JSON — ist ein Tool-Resultat mit `isError: true`, damit das Modell ihn als
+# Fehlschlag liest und nicht als Befund. Bis v2.0.1 kam der Envelope mit
+# `match_type: "error"` als gewöhnliches Resultat mit `isError: false`: wer nur
+# das Flag prüfte, las «Verbindung fehlgeschlagen» als gültige Antwort.
+#
+# Gelöst bei der Registrierung und nicht in `_fail`: Die Python-Funktion
+# liefert weiterhin ihre `FedlexResponse` (direkte Aufrufe und die Unit-Tests
+# bleiben unberührt), nur der beim SDK registrierte Wrapper setzt das Flag.
+# `Annotated[CallToolResult, FedlexResponse]` hält das `outputSchema` gleich
+# und erlaubt dem Wrapper, im Erfolgsfall das Modell unverändert
+# durchzureichen — nachgemessen in beiden Ären; der Lock-Test (SEP-022) wacht.
+#
+# `structuredContent` bleibt auch im Fehlerfall: Das `outputSchema` beschreibt
+# den Envelope, und `match_type`/`message` sind genau die Angaben, mit denen ein
+# Client den Fehlschlag einordnet. Der Textinhalt ist derselbe JSON-Envelope wie
+# im Erfolgsfall, damit Clients ohne `structuredContent` dieselbe Form sehen.
+
+ToolResult = Annotated[CallToolResult, FedlexResponse]
+
+
+def _as_tool_result(resp: FedlexResponse) -> FedlexResponse | CallToolResult:
+    """Ein Ausführungsfehler wird zum Resultat mit `isError: true`."""
+    if resp.match_type != "error":
+        return resp
+    payload = resp.model_dump(mode="json")
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, ensure_ascii=False))],
+        structured_content=payload,
+        is_error=True,
+    )
+
+
+def _tool(**kwargs: Any):
+    """Registriert ein Tool wie `mcp.tool(...)`, mit Fehler-Flag (OBS-001).
+
+    Gibt die UNVERÄNDERTE Funktion zurück — beim SDK liegt der Wrapper.
+    """
+
+    def register(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args: Any, **kw: Any) -> FedlexResponse | CallToolResult:
+            return _as_tool_result(await fn(*args, **kw))
+
+        wrapper.__annotations__ = {**fn.__annotations__, "return": ToolResult}
+        mcp.tool(**kwargs)(wrapper)
+        return fn
+
+    return register
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_search_laws",
     description=(
         "Durchsucht die Systematische Rechtssammlung (SR) des Bundes nach Erlasstiteln "
@@ -883,7 +942,7 @@ def _law_record(b: dict, lang: str) -> dict:
     }
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_law_by_sr",
     description=(
         "Ruft einen Bundeserlass anhand seiner SR-Nummer ab (Detailansicht mit "
@@ -983,7 +1042,7 @@ SELECT DISTINCT ?ca ?title ?titleShort ?srNumber ?inForceStatus ?entryDate WHERE
             return _fail(tool, e)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_recent_publications",
     description=(
         "Ruft die neuesten Publikationen der Amtlichen Sammlung (AS) ab.\n"
@@ -1055,7 +1114,7 @@ LIMIT {params.limit}
             return _fail(tool, e)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_upcoming_changes",
     description=(
         "Ruft Erlasse ab, die in den nächsten N Tagen in Kraft treten.\n"
@@ -1145,7 +1204,7 @@ LIMIT {params.limit}
             return _fail(tool, e)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_search_gazette",
     description=(
         "Durchsucht das Bundesblatt (BBl) nach amtlichen Publikationen.\n"
@@ -1224,7 +1283,7 @@ LIMIT {params.limit}
             return _fail(tool, e)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_law_history",
     description=(
         "Ruft die Versionsgeschichte (alle konsolidierten Fassungen) eines Erlasses ab.\n"
@@ -1309,7 +1368,7 @@ LIMIT 50
             return _fail(tool, e)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_search_treaties",
     description=(
         "Sucht internationale Staatsverträge der Schweiz (SR-Nummern beginnen mit '0.').\n"
@@ -1655,7 +1714,7 @@ class TermdatGetConceptInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_open_consultations",
     description=(
         "Listet aktuell OFFENE Vernehmlassungen des Bundes (Fristen-Monitoring).\n"
@@ -1739,7 +1798,7 @@ async def fedlex_get_open_consultations(params: GetOpenConsultationsInput) -> Fe
             return _fail(tool, e, source=ATTRIBUTION_FEDLEX)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_search_consultations",
     description=(
         "Volltextsuche über Vernehmlassungen (Titel und Beschreibung), mit Filtern.\n"
@@ -1822,7 +1881,7 @@ async def fedlex_search_consultations(params: SearchConsultationsInput) -> Fedle
             return _fail(tool, e, source=ATTRIBUTION_FEDLEX)
 
 
-@mcp.tool(
+@_tool(
     name="fedlex_get_consultation",
     description=(
         "Detail zu einer Vernehmlassung anhand ihrer eventId.\n"
@@ -1925,7 +1984,7 @@ async def fedlex_get_consultation(params: GetConsultationInput) -> FedlexRespons
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(
+@_tool(
     name="termdat_lookup_term",
     description=(
         "Schlägt einen Fachbegriff in TERMDAT nach und liefert die Entsprechungen "
@@ -2067,7 +2126,7 @@ SELECT ?c ?id ?name ?nl ?desc ?dl WHERE {{
             )
 
 
-@mcp.tool(
+@_tool(
     name="termdat_get_concept",
     description=(
         "Ruft den vollständigen TERMDAT-Eintrag zu einer ID oder URI ab.\n"

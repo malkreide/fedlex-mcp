@@ -495,10 +495,20 @@ Vier Folgen der modernen Revision sind in diesem Server sichtbar:
   abgekuendigter Aufruf, den das SDK verwarf. Die Beobachtbarkeit liegt jetzt
   beim Betreiber (structlog auf stderr, optional OpenTelemetry); ein
   Fehlschlag erreicht den Aufrufer im Tool-Resultat selbst
-  (`match_type: "error"`).
+  (`isError: true`, siehe unten).
 - **`serverInfo` traegt die Paketversion.** Unter `2026-07-28` steht die
   Identitaet im `_meta` jeder Antwort, nicht einmalig im `initialize`. Bis
   v2.0.1 war ihre `version` ein Leerstring.
+
+**Tool-Fehler tragen `isError: true`.** Die Spec trennt Protokollfehler
+(unbekanntes Tool, Argumente verletzen das Schema: JSON-RPC-Fehler, beantwortet
+vom SDK) von Ausfuehrungsfehlern (Fedlex oder LINDAS nicht erreichbar, Antwort
+kein JSON: Tool-Resultat mit `isError: true`). Bis v2.0.1 kamen letztere mit
+`isError: false`, nur `match_type: "error"` im Envelope sagte es. Der Envelope
+reist weiter als `structuredContent`; «nichts gefunden» (`match_type: "none"`)
+ist eine gueltige Antwort und traegt das Flag *nicht*. Jedes registrierte Tool
+wird in beiden Aeren in [`tests/test_tool_errors.py`](tests/test_tool_errors.py)
+geprueft.
 
 Beide Aeren werden in [`tests/test_modern_era.py`](tests/test_modern_era.py)
 ueber den Draht gefahren: ein sitzungsloses `server/discover` und `tools/call`

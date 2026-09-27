@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Behoben — Tool-Fehler mit `isError: true` (OBS-001)
+
+- **Ein Ausfall von Fedlex oder LINDAS kam als gültiges Resultat zurück.** Der
+  Envelope trug `match_type: "error"`, das Tool-Resultat aber `isError: false`.
+  Ein Client oder Modell, das nur das Flag las, nahm «Verbindung
+  fehlgeschlagen» als Antwort der Quelle. Jetzt `isError: true`, in beiden Ären.
+- **Zentral bei der Registrierung gelöst.** `@_tool(...)` ersetzt `@mcp.tool(...)`
+  an allen zwölf Tools und registriert beim SDK einen Wrapper, der nur den
+  Fehlerfall in ein `CallToolResult(is_error=True)` verwandelt. Die
+  Modulfunktion bleibt unverändert und liefert beim Direktaufruf ihre
+  `FedlexResponse`. Rückgabe-Annotation `Annotated[CallToolResult,
+  FedlexResponse]`: `outputSchema` unverändert, `tool-definitions.lock.json`
+  bleibt.
+- **`structuredContent` bleibt auch im Fehlerfall**, der Textinhalt ist derselbe
+  JSON-Envelope wie im Erfolgsfall. «Nichts gefunden» (`match_type: "none"`)
+  trägt das Flag bewusst nicht — eine leere Suche ist ein Befund, keine Störung.
+  Protokollfehler (Schemaverletzung) beantwortet weiter das SDK.
+- **`tests/test_tool_errors.py`** (34 Fälle): jedes Tool aus `tools/list` in
+  beiden Ären bei unerreichbaren Endpunkten; Treffer, kein Treffer und
+  Schemafehler als Gegenseite; Direktaufruf unverändert. Die Wartezeit der
+  Retry-Policy wird über den Modul-Alias `sparql_client._sleep` genullt (45 s →
+  3 s). Gegenprobe: Wrapper neutralisiert → alle 24 Ausfallfälle rot; ein Tool
+  mit `@mcp.tool` registriert → genau dessen zwei rot; Flag auf alles gesetzt →
+  genau die vier Treffer-/Leer-Fälle rot.
+
 ### Geändert — nativ auf Spec 2026-07-28
 
 Nachgemessen mit einem echten Client in beiden Ären, nicht aus dem
