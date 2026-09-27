@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-27
+
+**Kurzfassung für Nutzende.** Seit 2.0.1 sind 121 Commits dazugekommen; die
+Einzelheiten stehen in den Abschnitten darunter. Was sich im Betrieb ändert:
+
+- **Nativ auf MCP-Spec 2026-07-28**, weiterhin mit `initialize`-Handshake bis
+  2025-11-25 für bestehende Clients. `serverInfo` meldet jetzt Version, Titel und
+  Website (bisher leere Version).
+- **Browser-Clients funktionieren über Streamable HTTP.** CORS gibt die
+  Routing-Header der neuen Spec frei (`Mcp-Method`, `Mcp-Name`,
+  `Mcp-Protocol-Version`) sowie `DELETE` zum Beenden einer Session; bisher
+  scheiterte jede Cross-Origin-Anfrage am Preflight.
+- **Fortschritt bei langen Abfragen.** Mit `progressToken` meldet der Server
+  jeden Versuch gegen Fedlex oder LINDAS, bei einem Retry mit Grund.
+- **Frischehinweise** (`ttlMs`, `cacheScope`) auf `tools/list`,
+  `resources/list`, `resources/templates/list` und `server/discover`.
+- **Robuster gegenüber der Quelle:** eine Antwort ohne JSON wird mit Status
+  und Content-Type benannt statt als «Unerwarteter Fehler»; das Zeitbudget für
+  Wiederholungen ist jetzt eine echte Obergrenze.
+
+**Verhaltensänderungen, auf die ein Client achten sollte:**
+
+- **Tool-Fehler tragen `isError: true`.** Ein Ausfall von Fedlex oder LINDAS
+  kam bisher mit `isError: false`. Der Envelope (`match_type: "error"`) bleibt
+  als `structuredContent` erhalten; «nichts gefunden» trägt das Flag nicht.
+- **Keine Log-Notifications mehr.** Die Logging-Capability ist mit 2026-07-28
+  abgekündigt; bisher gingen `notifications/message` hinaus, ohne dass die
+  Capability deklariert war.
+
+Tool-Namen und Eingabe-/Ausgabeschemas sind unverändert
+(`tool-definitions.lock.json`), daher ein Minor-Release.
+
+**Abhängigkeit geprüft, nicht angenommen.** `mcp[cli]>=2.0.0,<3` bleibt. Am
+2026-09-27 lief die volle Suite (274 Fälle) gegen `mcp` 2.0.0, 2.0.1, 2.1.0,
+2.1.1 und 2.2.0 grün, jeweils mit der tatsächlich installierten Version
+kontrolliert. Die neuen Funktionen dieses Releases brauchen also keine höhere
+Untergrenze.
+
 ### Neu — Fortschritt für lange SPARQL-Aufrufe (SDK-003)
 
 - **Jeder Versuch gegen Fedlex oder LINDAS wird gemeldet**
