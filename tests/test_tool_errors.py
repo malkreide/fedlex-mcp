@@ -1,7 +1,7 @@
 """OBS-001: ein Ausführungsfehler ist ein Tool-Resultat mit `isError: true`.
 
-Die Spec trennt Protokollfehler (JSON-RPC-Fehlerantwort, vom SDK) von
-Ausführungsfehlern (Tool-Resultat mit `isError: true`). Bis v2.0.1 kam ein
+Ein Ausführungsfehler ist nach Spec ein Tool-Resultat mit `isError: true`,
+keine JSON-RPC-Fehlerantwort. Bis v2.0.1 kam ein
 Ausfall von Fedlex oder LINDAS als gewöhnliches Resultat mit `isError: false`
 zurück; nur `match_type: "error"` im Envelope sagte, dass nichts gefunden,
 sondern nichts gefragt worden war.
@@ -142,9 +142,11 @@ async def test_kein_treffer_ist_kein_fehler(mode: str) -> None:
 
 
 @pytest.mark.parametrize("mode", MODES)
-async def test_ein_schemafehler_bleibt_ein_protokollfehler(mode: str) -> None:
-    """Die andere Hälfte der Trennung: ungültige Argumente erreichen das Tool
-    gar nicht, es gibt also keinen Envelope — nur die Antwort des SDK."""
+async def test_einen_schemafehler_beantwortet_das_sdk(mode: str) -> None:
+    """Ungültige Argumente erreichen das Tool gar nicht. Seit 2025-11-25 sind
+    sie trotzdem ein Ausführungsfehler (`isError: true`, damit das Modell die
+    Eingabe korrigieren kann) — aber einer des SDK, ohne Envelope. Fällt
+    `structuredContent is None`, liefe die Validierung erst im Tool."""
     async with Client(mcp, mode=mode) as client:
         result = await client.call_tool("fedlex_get_law_by_sr", {"params": {"sr_number": "x"}})
     assert result.is_error is True

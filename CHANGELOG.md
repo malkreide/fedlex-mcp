@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`structuredContent` bleibt auch im Fehlerfall**, der Textinhalt ist derselbe
   JSON-Envelope wie im Erfolgsfall. «Nichts gefunden» (`match_type: "none"`)
   trägt das Flag bewusst nicht — eine leere Suche ist ein Befund, keine Störung.
-  Protokollfehler (Schemaverletzung) beantwortet weiter das SDK.
+  Eine Schemaverletzung beantwortet weiter das SDK — ebenfalls mit
+  `isError: true`, aber ohne Envelope, weil das Tool nie läuft.
 - **`tests/test_tool_errors.py`** (34 Fälle): jedes Tool aus `tools/list` in
   beiden Ären bei unerreichbaren Endpunkten; Treffer, kein Treffer und
   Schemafehler als Gegenseite; Direktaufruf unverändert. Die Wartezeit der

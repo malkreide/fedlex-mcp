@@ -726,11 +726,12 @@ class SearchTreatiesInput(BaseModel):
 # Tool-Registrierung: Ausführungsfehler als `isError: true` (OBS-001)
 # ---------------------------------------------------------------------------
 #
-# Die Spec trennt zwei Fehlerarten. Ein Protokollfehler (unbekanntes Tool,
-# Schema verletzt) ist eine JSON-RPC-Fehlerantwort; die liefert das SDK selbst.
 # Ein AUSFÜHRUNGSFEHLER — Fedlex oder LINDAS nicht erreichbar, Antwort kein
-# JSON — ist ein Tool-Resultat mit `isError: true`, damit das Modell ihn als
-# Fehlschlag liest und nicht als Befund. Bis v2.0.1 kam der Envelope mit
+# JSON — ist nach Spec ein Tool-Resultat mit `isError: true`, damit das Modell
+# ihn als Fehlschlag liest und nicht als Befund. Argumente, die das Schema
+# verletzen, zählen seit 2025-11-25 ebenfalls dazu (das Modell soll seine
+# Eingabe korrigieren können); die beantwortet das SDK selbst, bevor das Tool
+# läuft — gemessen in beiden Ären, ebenso für ein unbekanntes Tool. Bis v2.0.1 kam der Envelope mit
 # `match_type: "error"` als gewöhnliches Resultat mit `isError: false`: wer nur
 # das Flag prüfte, las «Verbindung fehlgeschlagen» als gültige Antwort.
 #

@@ -531,10 +531,13 @@ Four consequences of the modern revision are visible in this server:
   stamped into the `_meta` of every response, not sent once at `initialize`.
   Up to v2.0.1 its `version` was an empty string.
 
-**Tool failures carry `isError: true`.** The spec separates protocol errors
-(unknown tool, arguments that violate the schema: a JSON-RPC error, answered by
-the SDK) from execution errors (Fedlex or LINDAS unreachable, a body that is not
-JSON: a tool result with `isError: true`). Up to v2.0.1 the latter came back
+**Tool failures carry `isError: true`.** The spec reports an execution error
+(Fedlex or LINDAS unreachable, a body that is not JSON) as a tool result with
+`isError: true`, not as a JSON-RPC error. Since `2025-11-25` arguments that
+violate the input schema count as execution errors too, so the model can correct
+its input; the SDK answers those itself before the tool runs, without an
+envelope — measured in both eras, and likewise for an unknown tool name. Up to
+v2.0.1 the server's own failures came back
 with `isError: false`, and only `match_type: "error"` inside the envelope said
 so. The envelope still travels as `structuredContent`; "nothing found"
 (`match_type: "none"`) is a valid answer and is *not* flagged. Every registered
