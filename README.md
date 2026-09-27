@@ -526,10 +526,20 @@ Four consequences of the modern revision are visible in this server:
   declaring the `logging` capability, on modern ones as a deprecated call the
   SDK dropped. Observability now sits with the operator (structlog on stderr,
   optional OpenTelemetry); a failure reaches the caller in the tool result
-  itself (`match_type: "error"`).
+  itself (`isError: true`, see below).
 - **`serverInfo` carries the package version.** In `2026-07-28` the identity is
   stamped into the `_meta` of every response, not sent once at `initialize`.
   Up to v2.0.1 its `version` was an empty string.
+
+**Tool failures carry `isError: true`.** The spec separates protocol errors
+(unknown tool, arguments that violate the schema: a JSON-RPC error, answered by
+the SDK) from execution errors (Fedlex or LINDAS unreachable, a body that is not
+JSON: a tool result with `isError: true`). Up to v2.0.1 the latter came back
+with `isError: false`, and only `match_type: "error"` inside the envelope said
+so. The envelope still travels as `structuredContent`; "nothing found"
+(`match_type: "none"`) is a valid answer and is *not* flagged. Every registered
+tool is checked in both eras in
+[`tests/test_tool_errors.py`](tests/test_tool_errors.py).
 
 Both eras are exercised over the wire in
 [`tests/test_modern_era.py`](tests/test_modern_era.py): a session-less
