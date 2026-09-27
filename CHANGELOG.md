@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Geändert — nativ auf Spec 2026-07-28
+
+Nachgemessen mit einem echten Client in beiden Ären, nicht aus dem
+Spec-Changelog geschlossen. Die Aushandlung, `server/discover`, die
+Cache-Hinweise und die CORS-Routing-Header standen schon; zwei Stellen nicht.
+
+- **Keine Log-Notifications mehr (SEP-2577).** Jedes der zwölf Tools rief
+  `ctx.info()` beim Aufruf und `ctx.error()` im Fehlerpfad. Im Handshake bis
+  `2025-11-25` ging die `notifications/message` hinaus, obwohl `initialize` keine
+  `logging`-Capability meldete — die Spec verlangt die Deklaration von jedem
+  Server, der loggt. In `2026-07-28` ist die Capability abgekündigt: Ohne
+  `_meta`-Opt-in des Clients verwarf das SDK die Nachricht, und jeder Aufruf warf
+  eine `MCPDeprecationWarning`. `_trace()` und `_fail()` loggen jetzt nur noch
+  betreiberseitig (structlog auf stderr, OBS-003); der Aufrufer erfährt einen
+  Fehlschlag wie bisher aus dem Resultat (`match_type: "error"`). Der
+  `ctx`-Parameter entfällt in allen Tools — das SDK blendet ihn aus dem Schema
+  aus, `tool-definitions.lock.json` bleibt unverändert.
+- **`serverInfo` meldet Version, Titel und Website.** `version` war ein
+  Leerstring: `MCPServer` bekam keine, und das SDK setzt bewusst keine eigene
+  ein. Unter `2026-07-28` reist die Identität als `_meta`-Stempel auf **jeder**
+  Antwort. Die Version kommt aus den Paket-Metadaten
+  (`importlib.metadata`), wie `scripts/check_version_sync.py` es für `src/`
+  vorschreibt.
+- **`tests/test_modern_era.py`** fährt die moderne Ära über den Draht:
+  sitzungsloses `server/discover` und `tools/call` durch den ASGI-Stack
+  (`supportedVersions`, kein `Mcp-Session-Id`, `serverInfo`-Stempel) sowie je
+  Ära einen Tool-Aufruf mit Erfolg und Fehler, der weder eine Log-Notification
+  noch eine Abkündigungswarnung erzeugen darf. In der modernen Ära mit
+  `log_level`-Opt-in — ohne es wäre der Test auch gegen den alten Code grün.
+  Gegenprobe: gegen `server.py` aus v2.0.1 fallen 11 der 13 Fälle; die zwei
+  übrigen (`supportedVersions`, keine Session) sind SDK-Wachen. Nur `version=`
+  neutralisiert fallen genau die drei Versionsfälle.
+- `test_tool_accepts_ctx_none` entfällt mit dem Parameter, den es prüfte.
+
 ### Removed
 
 - **Das Codex-Gate ist entfernt.** Weg sind `.github/workflows/codex-gate.yml`,

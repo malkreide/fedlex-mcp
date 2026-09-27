@@ -310,6 +310,7 @@ PYTHONPATH=src pytest tests/ -m "not live"
 python scripts/check_ruff_pin.py
 ruff check src/ tests/ scripts/
 ruff format --check src/ tests/ scripts/
+python scripts/check_version_sync.py
 ```
 
 Matrix: Python 3.11, 3.12, 3.13. Zusätzlich `security.yml`: gitleaks-Secret-Scan.
@@ -326,11 +327,13 @@ und schliesst falsch, der Schutz fehle. Nach einer beabsichtigten Änderung
 `PYTHONPATH=src python scripts/snapshot_tools.py` und die Lock-Datei
 mitcommitten.
 
-**Es gibt kein Versions-Sync-Gate.** `scripts/` enthält
-`classify_live_run.py`, `record_fixtures.py` und `snapshot_tools.py` — kein
-`check_version_sync.py`, und kein Workflow ruft eines auf. `pyproject.toml`
-und `server.json` stehen beide auf `2.0.1`, gehalten wird das von nichts.
-Beim Anheben also beide Stellen von Hand.
+**Das Versions-Sync-Gate gibt es.** Diese Stelle behauptete bis zum 27.9.2026
+das Gegenteil; `ci.yml` fährt `scripts/check_version_sync.py` als letzten
+Schritt. `pyproject.toml` ist die Quelle, geprüft werden `server.json`
+(`version` und jedes `packages[*].version`) und die Versions-Badges beider
+READMEs. Beim Anheben also diese Stellen mitziehen — das Gate sagt, welche
+fehlt. In `src/` darf keine Versionsnummer stehen: die Laufzeit liest sie aus
+`importlib.metadata` (`server._package_version()`, für `serverInfo`).
 
 CI-Status über die Checks-API lesen (`actions_list`, `list_workflow_runs`).
 Die Commit-Status-API (`get_status`) meldet hier immer `total_count: 0` — das

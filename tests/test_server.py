@@ -359,20 +359,6 @@ def test_server_imports() -> None:
     assert hasattr(server, "mcp")
 
 
-@respx.mock
-@pytest.mark.asyncio
-async def test_tool_accepts_ctx_none() -> None:
-    respx.get(ENDPOINT).mock(
-        return_value=_sparql_response(
-            [
-                _binding(ca="https://fedlex.data.admin.ch/eli/cc/101", title="BV", srNumber="101"),
-            ]
-        )
-    )
-    resp = await server.fedlex_search_laws(SearchLawsInput(keywords="Verfassung"), ctx=None)
-    assert resp.count == 1
-
-
 @pytest.mark.parametrize("sr_number", ["101", "210.10", "172.021"])
 def test_sr_number_format_valid(sr_number: str) -> None:
     assert re.match(server.SR_NUMBER_PATTERN, sr_number)

@@ -477,6 +477,34 @@ das Spec-Changelog zwischen den beiden Revisionen lesen, pruefen, ob sich der
 Server weiterhin richtig verhaelt, dann Konstante, diesen Abschnitt, `README.md`
 und [`CHANGELOG.md`](CHANGELOG.md) gemeinsam bewegen.
 
+Vier Folgen der modernen Revision sind in diesem Server sichtbar:
+
+- **CORS nennt die Routing-Header.** `Mcp-Method`, `Mcp-Name` und
+  `Mcp-Protocol-Version` reisen auf jeder Streamable-HTTP-Anfrage mit, und ein
+  Browser darf nur Header senden, die der Server freigibt. Siehe
+  `CORS_ROUTING_HEADERS` in `server.py`.
+- **Die auflistenden Methoden tragen einen Frischehinweis.** `tools/list`,
+  `resources/list`, `resources/templates/list` und `server/discover` antworten
+  mit `ttlMs` 300000 und `cacheScope` `public` (`CACHE_HINTS`).
+  `resources/read` bewusst nicht: Es liefert Bundesrecht, und ein Client darf
+  einen aufgehobenen Erlass nicht fuenf Minuten lang als frisch behandeln.
+- **Keine Log-Notifications.** Die Logging-Capability ist seit `2026-07-28`
+  abgekuendigt (SEP-2577). Bis v2.0.1 schickte jedes Tool per
+  `ctx.info()`/`ctx.error()` eine `notifications/message` — im Handshake, ohne
+  je die `logging`-Capability zu deklarieren, in der modernen Aera als
+  abgekuendigter Aufruf, den das SDK verwarf. Die Beobachtbarkeit liegt jetzt
+  beim Betreiber (structlog auf stderr, optional OpenTelemetry); ein
+  Fehlschlag erreicht den Aufrufer im Tool-Resultat selbst
+  (`match_type: "error"`).
+- **`serverInfo` traegt die Paketversion.** Unter `2026-07-28` steht die
+  Identitaet im `_meta` jeder Antwort, nicht einmalig im `initialize`. Bis
+  v2.0.1 war ihre `version` ein Leerstring.
+
+Beide Aeren werden in [`tests/test_modern_era.py`](tests/test_modern_era.py)
+ueber den Draht gefahren: ein sitzungsloses `server/discover` und `tools/call`
+durch den zusammengebauten ASGI-Stack, dazu je Aera ein Tool-Aufruf, der weder
+eine Log-Notification noch eine Abkuendigungswarnung des SDK erzeugen darf.
+
 ---
 
 ## Tests

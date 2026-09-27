@@ -32,11 +32,13 @@ JOLux-Datenmodell (verifiziert):
 Transport: Dual — stdio (lokal) und Streamable HTTP (Cloud/Render.com),
 wählbar über die Umgebungsvariable FEDLEX_TRANSPORT (stdio | streamable-http).
 
-MCP Protocol Version: ausgehandelt vom mcp-SDK (>=1.3.0); siehe README-Sektion
-"MCP Protocol Version".
+MCP Protocol Version: nativ 2026-07-28 (Pro-Request-Envelope, `server/discover`),
+daneben der `initialize`-Handshake bis 2025-11-25 fuer bestehende Clients. Die
+Aushandlung liegt im mcp-SDK; siehe README-Sektion "MCP Protocol Version".
 """
 
 import hashlib
+import importlib.metadata
 import json
 import os
 import re
@@ -51,7 +53,7 @@ from typing import Any, Literal
 import httpx
 import structlog
 from mcp.server.caching import CacheHint
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -338,15 +340,26 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[AppContext]:
             log.info("lifespan_stop")
 
 
-async def _trace(ctx: Context | None, tool: str, **fields: object) -> None:
-    """Loggt einen Tool-Aufruf strukturiert (OBS-003) und — falls ein MCP-Context
-    vorhanden ist — auch an den Client zurück (SDK-003)."""
+# Spec 2026-07-28 (SEP-2577) hat die Logging-Capability abgekuendigt. Bis
+# v2.0.1 schickte jedes Tool per `ctx.info()`/`ctx.error()` eine
+# `notifications/message` an den Client — nachgemessen mit falscher Wirkung in
+# BEIDEN Aeren:
+#
+# * Handshake-Aera: die Notification ging raus, obwohl `initialize` keine
+#   `logging`-Capability meldete. 2025-11-25 verlangt die Deklaration von jedem
+#   Server, der Log-Nachrichten sendet.
+# * Moderne Aera: der Client hatte nicht per `_meta`-`logLevel` eingewilligt,
+#   also verwarf das SDK die Nachricht — und jeder Tool-Aufruf warf eine
+#   `MCPDeprecationWarning`.
+#
+# Die Beobachtbarkeit liegt deshalb dort, wo die Spec sie jetzt sieht: beim
+# Betreiber (structlog auf stderr, OBS-003; optional OpenTelemetry, OBS-006).
+# Der Aufrufer erfaehrt einen Fehlschlag aus dem Tool-Resultat selbst
+# (`match_type: "error"` plus maskierte Meldung) und nicht aus einem
+# Seitenkanal, den er abonnieren muesste.
+def _trace(tool: str, **fields: object) -> None:
+    """Loggt einen Tool-Aufruf strukturiert (OBS-003), betreiberseitig."""
     log.info("tool_call", tool=tool, **fields)
-    if ctx is not None:
-        try:
-            await ctx.info(f"{tool}: Anfrage an Fedlex SPARQL")
-        except Exception:  # pragma: no cover - Context ohne aktive Session
-            pass
 
 
 def _ok(
@@ -389,8 +402,7 @@ def _empty(
     )
 
 
-async def _fail(
-    ctx: Context | None,
+def _fail(
     tool: str,
     e: Exception,
     *,
@@ -398,13 +410,11 @@ async def _fail(
     source: str = SOURCE_NAME,
     license: str = SOURCE_LICENSE,
 ) -> FedlexResponse:
-    """Einheitlicher Fehler-Pfad: maskierte Meldung + ctx.error (SDK-003 / OBS-002)."""
+    """Einheitlicher Fehler-Pfad: maskierte Meldung im Resultat (OBS-002).
+
+    Geloggt wird in `handle_error`, betreiberseitig — siehe `_trace`.
+    """
     msg = handle_error(tool, e, service=service)
-    if ctx is not None:
-        try:
-            await ctx.error(msg)
-        except Exception:  # pragma: no cover - Context ohne aktive Session
-            pass
     return FedlexResponse(
         source=source,
         license=license,
@@ -581,8 +591,29 @@ CACHE_HINTS = {
     "server/discover": CacheHint(ttl_ms=LIST_CACHE_TTL_MS, scope="public"),
 }
 
+
+def _package_version() -> str:
+    """Die installierte Paketversion — die Laufzeitquelle, die
+    `scripts/check_version_sync.py` fuer `src/` vorschreibt."""
+    try:
+        return importlib.metadata.version("fedlex-mcp")
+    except importlib.metadata.PackageNotFoundError:  # pragma: no cover - nur ohne Installation
+        return "unbekannt"
+
+
+# Die Identitaet des Servers. Unter 2026-07-28 reist sie als `serverInfo`-Stempel
+# im `_meta` JEDER Antwort, nicht mehr nur einmal im `initialize`. Ohne
+# `version` meldete der Server dort bis v2.0.1 einen Leerstring: das SDK setzt
+# bewusst keine eigene Nummer ein. Ein Client, der nach Server-Version cacht
+# oder Fehler zuordnet, sah also bei jedem Release dieselbe Kennung.
+SERVER_TITLE = "Fedlex — Schweizer Bundesrecht"
+SERVER_WEBSITE = "https://github.com/malkreide/fedlex-mcp"
+
 mcp = MCPServer(
     "fedlex_mcp",
+    title=SERVER_TITLE,
+    version=_package_version(),
+    website_url=SERVER_WEBSITE,
     cache_hints=CACHE_HINTS,
     instructions=(
         "MCP-Server für das Schweizer Bundesrecht (Fedlex). "
@@ -714,13 +745,13 @@ class SearchTreatiesInput(BaseModel):
         "openWorldHint": True,
     },
 )
-async def fedlex_search_laws(params: SearchLawsInput, ctx: Context | None = None) -> FedlexResponse:
+async def fedlex_search_laws(params: SearchLawsInput) -> FedlexResponse:
     """Durchsucht die Systematische Rechtssammlung (SR) des Bundes nach Erlasstiteln."""
     tool = "fedlex_search_laws"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     kw = params.keywords.lower()
-    await _trace(ctx, tool, lang=lang, in_force_only=params.in_force_only)
+    _trace(tool, lang=lang, in_force_only=params.in_force_only)
 
     in_force_filter = (
         f"\n  ?ca jolux:inForceStatus <{STATUS_IN_FORCE}> ." if params.in_force_only else ""
@@ -788,7 +819,7 @@ LIMIT {params.limit}
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 def _law_detail_markdown(
@@ -871,15 +902,13 @@ def _law_record(b: dict, lang: str) -> dict:
         "openWorldHint": True,
     },
 )
-async def fedlex_get_law_by_sr(
-    params: GetLawBySrInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_law_by_sr(params: GetLawBySrInput) -> FedlexResponse:
     """Ruft einen Bundeserlass anhand seiner SR-Nummer ab (Detailansicht)."""
     tool = "fedlex_get_law_by_sr"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     sr = params.sr_number.strip()
-    await _trace(ctx, tool, lang=lang, sr_number=sr)
+    _trace(tool, lang=lang, sr_number=sr)
 
     query = f"""
 PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
@@ -951,7 +980,7 @@ SELECT DISTINCT ?ca ?title ?titleShort ?srNumber ?inForceStatus ?entryDate WHERE
             return _ok(tool, [record], md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 @mcp.tool(
@@ -972,15 +1001,13 @@ SELECT DISTINCT ?ca ?title ?titleShort ?srNumber ?inForceStatus ?entryDate WHERE
         "openWorldHint": True,
     },
 )
-async def fedlex_get_recent_publications(
-    params: GetRecentPublicationsInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_recent_publications(params: GetRecentPublicationsInput) -> FedlexResponse:
     """Ruft die neuesten Publikationen der Amtlichen Sammlung (AS) ab."""
     tool = "fedlex_get_recent_publications"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     since_date = (date.today() - timedelta(days=params.days)).isoformat()
-    await _trace(ctx, tool, lang=lang, days=params.days)
+    _trace(tool, lang=lang, days=params.days)
 
     query = f"""
 PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
@@ -1025,7 +1052,7 @@ LIMIT {params.limit}
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 @mcp.tool(
@@ -1046,16 +1073,14 @@ LIMIT {params.limit}
         "openWorldHint": True,
     },
 )
-async def fedlex_get_upcoming_changes(
-    params: GetUpcomingChangesInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_upcoming_changes(params: GetUpcomingChangesInput) -> FedlexResponse:
     """Ruft Erlasse ab, die in den nächsten N Tagen in Kraft treten."""
     tool = "fedlex_get_upcoming_changes"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     today = date.today().isoformat()
     future = (date.today() + timedelta(days=params.days_ahead)).isoformat()
-    await _trace(ctx, tool, lang=lang, days_ahead=params.days_ahead)
+    _trace(tool, lang=lang, days_ahead=params.days_ahead)
 
     query = f"""
 PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
@@ -1117,7 +1142,7 @@ LIMIT {params.limit}
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 @mcp.tool(
@@ -1138,15 +1163,13 @@ LIMIT {params.limit}
         "openWorldHint": True,
     },
 )
-async def fedlex_search_gazette(
-    params: SearchGazetteInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_search_gazette(params: SearchGazetteInput) -> FedlexResponse:
     """Durchsucht das Bundesblatt (BBl) nach amtlichen Publikationen."""
     tool = "fedlex_search_gazette"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     kw = params.keywords.lower()
-    await _trace(ctx, tool, lang=lang, year=params.year)
+    _trace(tool, lang=lang, year=params.year)
 
     year_filter = f'FILTER(STRSTARTS(STR(?pubDate), "{params.year}"))' if params.year else ""
 
@@ -1198,7 +1221,7 @@ LIMIT {params.limit}
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 @mcp.tool(
@@ -1219,15 +1242,13 @@ LIMIT {params.limit}
         "openWorldHint": True,
     },
 )
-async def fedlex_get_law_history(
-    params: GetLawHistoryInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_law_history(params: GetLawHistoryInput) -> FedlexResponse:
     """Ruft die Versionsgeschichte (alle konsolidierten Fassungen) eines Erlasses ab."""
     tool = "fedlex_get_law_history"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
     sr = params.sr_number.strip()
-    await _trace(ctx, tool, lang=lang, sr_number=sr)
+    _trace(tool, lang=lang, sr_number=sr)
 
     query = f"""
 PREFIX jolux: <http://data.legilux.public.lu/resource/ontology/jolux#>
@@ -1285,7 +1306,7 @@ LIMIT 50
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 @mcp.tool(
@@ -1306,14 +1327,12 @@ LIMIT 50
         "openWorldHint": True,
     },
 )
-async def fedlex_search_treaties(
-    params: SearchTreatiesInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_search_treaties(params: SearchTreatiesInput) -> FedlexResponse:
     """Sucht internationale Staatsverträge der Schweiz (SR-Nummern beginnen mit '0.')."""
     tool = "fedlex_search_treaties"
     lang = params.language.value
     suffix = LANG_SUFFIX[lang]
-    await _trace(ctx, tool, lang=lang, has_keywords=bool(params.keywords))
+    _trace(tool, lang=lang, has_keywords=bool(params.keywords))
 
     kw_filter = (
         f'FILTER(CONTAINS(LCASE(STR(?title)), "{sparql_escape(params.keywords.lower())}"))'
@@ -1372,7 +1391,7 @@ LIMIT {params.limit}
             return _ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(ctx, tool, e)
+            return _fail(tool, e)
 
 
 # ===========================================================================
@@ -1659,9 +1678,7 @@ class TermdatGetConceptInput(BaseModel):
         "openWorldHint": True,
     },
 )
-async def fedlex_get_open_consultations(
-    params: GetOpenConsultationsInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_open_consultations(params: GetOpenConsultationsInput) -> FedlexResponse:
     """Listet aktuell offene Vernehmlassungen, gefiltert über die Frist."""
     tool = "fedlex_get_open_consultations"
     lang = params.language.value
@@ -1670,7 +1687,7 @@ async def fedlex_get_open_consultations(
     retrieved_at = consultations.now_iso()
     terms = consultations.effective_terms(params.topic, params.keyword)
     filter_note = consultations.describe_filter(params.topic, terms)
-    await _trace(ctx, tool, lang=lang, topic=params.topic, has_keyword=bool(params.keyword))
+    _trace(tool, lang=lang, topic=params.topic, has_keyword=bool(params.keyword))
 
     query = consultations.build_open_query(lang, terms, today, params.limit)
     thema = f" zum Thema «{params.topic or params.keyword}»" if terms else ""
@@ -1719,7 +1736,7 @@ async def fedlex_get_open_consultations(
             return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX, message=filter_note)
 
         except Exception as e:
-            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+            return _fail(tool, e, source=ATTRIBUTION_FEDLEX)
 
 
 @mcp.tool(
@@ -1743,9 +1760,7 @@ async def fedlex_get_open_consultations(
         "openWorldHint": True,
     },
 )
-async def fedlex_search_consultations(
-    params: SearchConsultationsInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_search_consultations(params: SearchConsultationsInput) -> FedlexResponse:
     """Volltextsuche über Titel/Beschreibung von Vernehmlassungen, mit Filtern."""
     tool = "fedlex_search_consultations"
     lang = params.language.value
@@ -1754,8 +1769,7 @@ async def fedlex_search_consultations(
     terms = consultations.effective_terms(params.topic, None)
     filter_note = consultations.describe_filter(params.topic, terms)
     status_uri = CONSULTATION_STATUS_ALIASES[params.status] if params.status else None
-    await _trace(
-        ctx,
+    _trace(
         tool,
         lang=lang,
         topic=params.topic,
@@ -1805,7 +1819,7 @@ async def fedlex_search_consultations(
             return _ok(tool, results, md, source=ATTRIBUTION_FEDLEX, message=filter_note)
 
         except Exception as e:
-            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+            return _fail(tool, e, source=ATTRIBUTION_FEDLEX)
 
 
 @mcp.tool(
@@ -1829,16 +1843,14 @@ async def fedlex_search_consultations(
         "openWorldHint": True,
     },
 )
-async def fedlex_get_consultation(
-    params: GetConsultationInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def fedlex_get_consultation(params: GetConsultationInput) -> FedlexResponse:
     """Detail zu einer Vernehmlassung anhand ihrer eventId."""
     tool = "fedlex_get_consultation"
     lang = params.language.value
     today = today_in_zurich()
     retrieved_at = consultations.now_iso()
     event_id = params.event_id
-    await _trace(ctx, tool, lang=lang, event_id=event_id)
+    _trace(tool, lang=lang, event_id=event_id)
 
     query = consultations.build_detail_query(lang, event_id)
 
@@ -1905,7 +1917,7 @@ async def fedlex_get_consultation(
             return _ok(tool, [record], md, source=ATTRIBUTION_FEDLEX)
 
         except Exception as e:
-            return await _fail(ctx, tool, e, source=ATTRIBUTION_FEDLEX)
+            return _fail(tool, e, source=ATTRIBUTION_FEDLEX)
 
 
 # ---------------------------------------------------------------------------
@@ -1934,13 +1946,11 @@ async def fedlex_get_consultation(
         "openWorldHint": True,
     },
 )
-async def termdat_lookup_term(
-    params: TermdatLookupInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def termdat_lookup_term(params: TermdatLookupInput) -> FedlexResponse:
     """Begriff → Entsprechungen in de/fr/it/rm/en inkl. Definition (TERMDAT/LINDAS)."""
     tool = "termdat_lookup_term"
     langs = [lang.value for lang in params.target_languages]
-    await _trace(ctx, tool, term_len=len(params.term), targets=",".join(langs))
+    _trace(tool, term_len=len(params.term), targets=",".join(langs))
 
     esc = sparql_escape(params.term.lower())
     # Schritt 1: passende Einträge (Konzept ODER Synonym-Variante) über den Namen.
@@ -2048,8 +2058,7 @@ SELECT ?c ?id ?name ?nl ?desc ?dl WHERE {{
             return _termdat_ok(tool, results, md)
 
         except Exception as e:
-            return await _fail(
-                ctx,
+            return _fail(
                 tool,
                 e,
                 service="TERMDAT (LINDAS)",
@@ -2077,12 +2086,10 @@ SELECT ?c ?id ?name ?nl ?desc ?dl WHERE {{
         "openWorldHint": True,
     },
 )
-async def termdat_get_concept(
-    params: TermdatGetConceptInput, ctx: Context | None = None
-) -> FedlexResponse:
+async def termdat_get_concept(params: TermdatGetConceptInput) -> FedlexResponse:
     """Vollständiger TERMDAT-Eintrag zu einer URI oder ID (LINDAS)."""
     tool = "termdat_get_concept"
-    await _trace(ctx, tool, raw_len=len(params.concept))
+    _trace(tool, raw_len=len(params.concept))
 
     cid = termdat_concept_id(params.concept)
     if cid is None:
@@ -2180,8 +2187,7 @@ SELECT ?syn ?name ?nl WHERE {{
             return _termdat_ok(tool, [record], md)
 
         except Exception as e:
-            return await _fail(
-                ctx,
+            return _fail(
                 tool,
                 e,
                 service="TERMDAT (LINDAS)",
