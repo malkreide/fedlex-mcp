@@ -37,9 +37,12 @@ daneben der `initialize`-Handshake bis 2025-11-25 fuer bestehende Clients. Die
 Aushandlung liegt im mcp-SDK; siehe README-Sektion "MCP Protocol Version".
 """
 
+import asyncio
+import contextvars
 import functools
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import os
 import re
@@ -54,7 +57,7 @@ from typing import Annotated, Any, Literal
 import httpx
 import structlog
 from mcp.server.caching import CacheHint
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -470,9 +473,100 @@ async def run_lindas(query: str, client: httpx.AsyncClient | None = None) -> lis
         return await _execute_sparql(tmp, LINDAS_ENDPOINT, query)
 
 
+# ---------------------------------------------------------------------------
+# Fortschritt (SDK-003) — `notifications/progress` für lange SPARQL-Aufrufe
+# ---------------------------------------------------------------------------
+#
+# Ein Aufruf kann bis zu `sparql_client.TOTAL_BUDGET_S` dauern, und die Zeit
+# steckt fast ganz in Versuchen und den Wartezeiten dazwischen. Gemeldet wird
+# deshalb, was tatsächlich geschieht: jeder Versuch gegen einen Endpunkt, mit
+# Grund des vorigen Fehlschlags. `total` bleibt leer — es gibt keinen Gesamtwert,
+# der nicht erfunden wäre, und ein Balken, der bei 33 % stehen bleibt und dann
+# springt, sagt weniger als «Versuch 2 von 3 nach HTTP 503».
+#
+# Gemessen am 2026-09-27 (mcp 2.2.0), in beiden Ären: Ein Client mit
+# `progress_callback` schickt ein `progressToken`, die Meldungen kommen an; über
+# Streamable HTTP in 2026-07-28 wechselt die Antwort dafür auf SSE. Ohne Token
+# ist `report_progress` ein stiller No-op — keine Meldung, keine Warnung. Anders
+# als das Logging (SEP-2577) ist Fortschritt vom Server zum Client NICHT
+# abgekündigt; abgekündigt ist nur die Gegenrichtung.
+#
+# Der Kontext reist per ContextVar vom Wrapper in `_tool` zu `_execute_sparql`,
+# damit weder die Tool-Signaturen noch die zwölf Aufrufstellen ihn durchreichen
+# müssen. Ein Direktaufruf ohne SDK hat keinen Kontext und meldet nichts.
+#
+# `sparql_client.py` ist eine byte-identische Kopie mit `swiss-environment-mcp`
+# und ruft `on_retry` synchron auf. Statt das geteilte Modul zu ändern, vergibt
+# `note()` die Schrittnummer sofort (die Reihenfolge steht damit fest) und
+# schickt die Meldung als Task, die während der Retry-Wartezeit läuft;
+# `drain()` am Ende des Tool-Aufrufs wartet sie ab. Das ist nicht bloss
+# Vorsicht: ohne `drain()` kam die Retry-Meldung in der Handshake-Ära NACH dem
+# Resultat an (gegengeprobt, tests/test_progress.py).
+
+
+class _Progress:
+    """Fortschritt eines Tool-Aufrufs: monoton steigende Schritte, ohne Total."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+        self._step = 0
+        self._pending: list[asyncio.Task[None]] = []
+
+    async def _send(self, step: int, message: str) -> None:
+        try:
+            await self._ctx.report_progress(step, None, message)
+        except Exception as e:  # Fortschritt ist Beiwerk: nie den Aufruf kippen
+            log.warning("progress_failed", error_type=type(e).__name__)
+
+    async def step(self, message: str) -> None:
+        self._step += 1
+        await self._send(self._step, message)
+
+    def note(self, message: str) -> None:
+        """Synchroner Einstieg für `on_retry` (siehe Kommentar oben)."""
+        self._step += 1
+        self._pending.append(asyncio.create_task(self._send(self._step, message)))
+
+    async def drain(self) -> None:
+        if self._pending:
+            await asyncio.gather(*self._pending)
+            self._pending.clear()
+
+
+_progress: contextvars.ContextVar[_Progress | None] = contextvars.ContextVar(
+    "fedlex_progress", default=None
+)
+
+
+def _service_name(endpoint: str) -> str:
+    return "TERMDAT (LINDAS)" if endpoint.startswith(LINDAS_ENDPOINT) else "Fedlex"
+
+
+def _failure_reason(exc: Exception) -> str:
+    """Grund eines Fehlschlags für den Aufrufer — Status statt Exception-Text
+    (OBS-002: keine internen Details nach aussen)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException | TimeoutError):
+        return "Zeitüberschreitung"
+    if isinstance(exc, httpx.ConnectError | httpx.ReadError):
+        return "Verbindungsfehler"
+    return "Fehler"
+
+
 def _log_sparql_retry(attempt: int, endpoint: str, exc: Exception) -> None:
-    """Retry-Callback für den geteilten Client (bewahrt das bisherige Logging)."""
+    """Retry-Callback: loggt betreiberseitig und meldet den nächsten Versuch.
+
+    `attempt` ist die Zahl der fehlgeschlagenen Versuche; der nächste trägt
+    also die Nummer `attempt + 1`.
+    """
     log.info("sparql_retry", endpoint=endpoint, attempt=attempt, error_type=type(exc).__name__)
+    progress = _progress.get()
+    if progress is not None:
+        progress.note(
+            f"{_service_name(endpoint)}: Versuch {attempt + 1} von {RETRY_MAX_ATTEMPTS} "
+            f"nach {_failure_reason(exc)}"
+        )
 
 
 async def _execute_sparql(client: httpx.AsyncClient, endpoint: str, query: str) -> list[dict]:
@@ -482,6 +576,11 @@ async def _execute_sparql(client: httpx.AsyncClient, endpoint: str, query: str) 
     transienten Fehlern, exponentielles Backoff; deterministische 4xx sofort).
     `RETRY_BASE_DELAY` wird zur Laufzeit gelesen (Tests monkeypatchen).
     """
+    progress = _progress.get()
+    if progress is not None:
+        await progress.step(
+            f"Anfrage an {_service_name(endpoint)} (Versuch 1 von {RETRY_MAX_ATTEMPTS})"
+        )
     return await sparql_client.get_bindings(
         client,
         endpoint,
@@ -763,17 +862,31 @@ def _as_tool_result(resp: FedlexResponse) -> FedlexResponse | CallToolResult:
 
 
 def _tool(**kwargs: Any):
-    """Registriert ein Tool wie `mcp.tool(...)`, mit Fehler-Flag (OBS-001).
+    """Registriert ein Tool wie `mcp.tool(...)`, mit Fehler-Flag (OBS-001)
+    und Fortschritt (SDK-003).
 
     Gibt die UNVERÄNDERTE Funktion zurück — beim SDK liegt der Wrapper.
     """
 
     def register(fn):
         @functools.wraps(fn)
-        async def wrapper(*args: Any, **kw: Any) -> FedlexResponse | CallToolResult:
-            return _as_tool_result(await fn(*args, **kw))
+        async def wrapper(*args: Any, ctx: Context, **kw: Any) -> FedlexResponse | CallToolResult:
+            progress = _Progress(ctx)
+            token = _progress.set(progress)
+            try:
+                return _as_tool_result(await fn(*args, **kw))
+            finally:
+                await progress.drain()
+                _progress.reset(token)
 
-        wrapper.__annotations__ = {**fn.__annotations__, "return": ToolResult}
+        # `ctx` nachgerüstet (SDK-003): Das SDK liest die Signatur, und
+        # `functools.wraps` zeigt sonst die der Modulfunktion. Ein Parameter
+        # vom Typ `Context` wird injiziert und erscheint nicht im Schema —
+        # nachgemessen; der Lock-Test (SEP-022) wacht.
+        sig = inspect.signature(fn)
+        ctx_param = inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context)
+        wrapper.__signature__ = sig.replace(parameters=[*sig.parameters.values(), ctx_param])
+        wrapper.__annotations__ = {**fn.__annotations__, "ctx": Context, "return": ToolResult}
         mcp.tool(**kwargs)(wrapper)
         return fn
 
