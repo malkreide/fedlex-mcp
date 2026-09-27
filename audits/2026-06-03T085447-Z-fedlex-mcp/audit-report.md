@@ -11,7 +11,7 @@
 > | Finding | Stand | Datum | Nachweis |
 > |---|---|---|---|
 > | OBS-001 | Resolved | 2026-09-27 | malkreide/fedlex-mcp#86 |
-> | SDK-003 | Logging-Teil gegenstandslos (SEP-2577), Progress offen | 2026-09-27 | malkreide/fedlex-mcp#85 |
+> | SDK-003 | Resolved: Logging gegenstandslos (SEP-2577), Progress umgesetzt | 2026-09-27 | malkreide/fedlex-mcp#85, malkreide/fedlex-mcp#88 |
 
 ---
 

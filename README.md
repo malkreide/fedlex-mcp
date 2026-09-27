@@ -544,6 +544,15 @@ so. The envelope still travels as `structuredContent`; "nothing found"
 tool is checked in both eras in
 [`tests/test_tool_errors.py`](tests/test_tool_errors.py).
 
+**Long SPARQL calls report progress.** A call can take up to 45 s, and the time
+sits almost entirely in attempts and the back-off between them. A client that
+sends a `progressToken` receives one `notifications/progress` per attempt —
+"Anfrage an Fedlex (Versuch 1 von 3)", on a retry "Fedlex: Versuch 2 von 3 nach
+HTTP 503" — with no `total`, since none exists that would not be invented. Over
+streamable HTTP in `2026-07-28` the response switches to SSE for this; without a
+token nothing is sent. Unlike logging, server-to-client progress is *not*
+deprecated. See [`tests/test_progress.py`](tests/test_progress.py).
+
 Both eras are exercised over the wire in
 [`tests/test_modern_era.py`](tests/test_modern_era.py): a session-less
 `server/discover` and `tools/call` through the assembled ASGI stack, and a tool
