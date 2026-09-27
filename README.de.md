@@ -513,6 +513,16 @@ ist eine gueltige Antwort und traegt das Flag *nicht*. Jedes registrierte Tool
 wird in beiden Aeren in [`tests/test_tool_errors.py`](tests/test_tool_errors.py)
 geprueft.
 
+**Lange SPARQL-Aufrufe melden Fortschritt.** Ein Aufruf kann bis zu 45 s
+dauern, und die Zeit steckt fast ganz in Versuchen und den Wartezeiten
+dazwischen. Ein Client, der ein `progressToken` mitschickt, bekommt je Versuch
+ein `notifications/progress` — «Anfrage an Fedlex (Versuch 1 von 3)», bei einem
+Retry «Fedlex: Versuch 2 von 3 nach HTTP 503» — ohne `total`, weil es keinen
+gibt, der nicht erfunden waere. Ueber Streamable HTTP in `2026-07-28` wechselt
+die Antwort dafuer auf SSE; ohne Token geht nichts hinaus. Anders als das
+Logging ist Fortschritt vom Server zum Client *nicht* abgekuendigt. Siehe
+[`tests/test_progress.py`](tests/test_progress.py).
+
 Beide Aeren werden in [`tests/test_modern_era.py`](tests/test_modern_era.py)
 ueber den Draht gefahren: ein sitzungsloses `server/discover` und `tools/call`
 durch den zusammengebauten ASGI-Stack, dazu je Aera ein Tool-Aufruf, der weder

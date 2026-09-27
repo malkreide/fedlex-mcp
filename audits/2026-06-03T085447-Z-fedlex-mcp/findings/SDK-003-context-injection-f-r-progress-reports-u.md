@@ -1,7 +1,7 @@
 ## Finding: SDK-003 — Context Injection für Progress Reports und Logging
 
 **Severity:** medium
-**Status:** Open — Logging-Teil gegenstandslos seit 2026-09-27 (Spec 2026-07-28, SEP-2577); Progress-Teil offen
+**Status:** Resolved (2026-09-27) — Logging-Teil gegenstandslos (SEP-2577, malkreide/fedlex-mcp#85), Progress umgesetzt (malkreide/fedlex-mcp#88)
 **Server:** fedlex-mcp
 **Check-Reference:** SDK-003
 **PDF-Reference:** Sec 3.1
@@ -83,6 +83,26 @@ es vorsieht; der dritte bleibt offen.
   vom Client zum Server, nicht `ctx.report_progress` vom Server zum Client. Ob ein
   Client in der modernen Ära ein `progressToken` mitschickt und die Meldungen
   ankommen, ist vor einer Umsetzung zu messen.
+
+### Nachtrag 2026-09-27 (2) — Progress umgesetzt
+
+Umgesetzt mit [malkreide/fedlex-mcp#88](https://github.com/malkreide/fedlex-mcp/pull/88);
+damit ist der offene Teil aus dem Nachtrag oben erledigt.
+
+- **Vorher gemessen**, wie dort verlangt, in beiden Ären (mcp 2.2.0): Ein Client
+  mit `progress_callback` schickt ein `progressToken`, die Meldungen kommen an;
+  über Streamable HTTP in 2026-07-28 wechselt die Antwort auf SSE. Ohne Token ist
+  `report_progress` ein stiller No-op.
+- **Was gemeldet wird:** jeder Versuch gegen Fedlex oder LINDAS, bei einem Retry
+  mit dem Grund des vorigen Fehlschlags («Fedlex: Versuch 2 von 3 nach HTTP
+  503»). Kein `total` und keine Prozente — die Remediation oben zählt Datensätze
+  einer Schleife; hier gibt es nur Versuche, und ein erfundener Gesamtwert wäre
+  schlechter als keiner.
+- **Abweichung von der Remediation:** kein `ctx`-Parameter in den Tools. Der
+  Wrapper, der die Tools beim SDK registriert, nimmt den Kontext entgegen und
+  reicht ihn per ContextVar weiter; Schema und `tool-definitions.lock.json`
+  bleiben unverändert.
+- **Nachweis:** `tests/test_progress.py` (14 Fälle, Gegenprobe in vier Richtungen).
 
 Die Momentaufnahme oben (Observed Behavior, Gaps, Verifikations-Status) ist
 der Befund vom 2026-06-03 und bleibt unverändert; ebenso `verification-results.json`

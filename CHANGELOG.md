@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Neu — Fortschritt für lange SPARQL-Aufrufe (SDK-003)
+
+- **Jeder Versuch gegen Fedlex oder LINDAS wird gemeldet**
+  (malkreide/fedlex-mcp#88). Ein Aufruf kann bis zu 45 s dauern, fast ganz in
+  Versuchen und Wartezeiten. Mit `progressToken` kommt je Versuch ein
+  `notifications/progress`, bei einem Retry mit Grund («Fedlex: Versuch 2 von 3
+  nach HTTP 503», Status statt Exception-Text). `total` bleibt leer.
+- **Vorher gemessen, beide Ären:** Token kommt mit `progress_callback`,
+  Meldungen kommen an, Streamable HTTP in 2026-07-28 wechselt auf SSE, ohne
+  Token stiller No-op. Fortschritt vom Server zum Client ist — anders als das
+  Logging (SEP-2577) — nicht abgekündigt.
+- **Mechanik:** `ctx` in die Signatur des `_tool`-Wrappers nachgerüstet
+  (Schema und Tool-Lock unverändert), per ContextVar zu `_execute_sparql`.
+  `sparql_client.py` bleibt byte-identisch mit `swiss-environment-mcp`: der
+  synchrone `on_retry` vergibt die Schrittnummer und schickt per Task,
+  `drain()` wartet vor dem Resultat ab. Eine gescheiterte Meldung kippt den
+  Aufruf nicht.
+- **`tests/test_progress.py`** (14 Fälle). Gegenprobe: ContextVar nicht gesetzt
+  → 9 rot; Retry-Meldung aus → genau die 4 Retry-Fälle; `drain()` leer → 3 rot,
+  darunter die Retry-Fälle der Handshake-Ära (Meldung kam nach dem Resultat);
+  Fehlerabfang aus → genau der eine Fall.
+
 ### Dokumentation
 
 - **Audit vom 2026-06-03 nachgeführt.** OBS-001 steht auf *Resolved*
