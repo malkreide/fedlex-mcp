@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dokumentation
+
+- **Audit vom 2026-06-03 nachgeführt.** OBS-001 steht auf *Resolved*
+  (malkreide/fedlex-mcp#86). Bei SDK-003 ist der Logging-Teil seit Spec 2026-07-28
+  gegenstandslos (SEP-2577, malkreide/fedlex-mcp#85), der Progress-Teil bleibt
+  offen. Statuszeile und datierter Nachtrag in `findings/`, dazu ein Index oben
+  im Report; die Momentaufnahme selbst (`verification-results.json`,
+  `summary.json`, Befundtext) bleibt unverändert.
+- **Fehlerarten richtiggestellt.** Die Doku zu malkreide/fedlex-mcp#86 nannte
+  Schemaverletzung und unbekanntes Tool «Protokollfehler» mit JSON-RPC-Antwort.
+  Gemessen beantwortet das SDK beide als Resultat mit `isError: true`; für die
+  Schemaverletzung ist das seit 2025-11-25 spec-konform.
+
 ### Behoben — Tool-Fehler mit `isError: true` (OBS-001)
 
 - **Ein Ausfall von Fedlex oder LINDAS kam als gültiges Resultat zurück.** Der

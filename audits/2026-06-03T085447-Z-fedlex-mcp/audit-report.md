@@ -4,6 +4,15 @@
 **Skill-Version:** 1.0.0
 **Catalog-Version:** 68 checks / hash 091f446b
 
+> **Nachträge.** Dieser Report ist der Stand vom 2026-06-03 und bleibt unverändert.
+> Spätere Statusänderungen stehen als datierter Nachtrag in der jeweiligen Datei
+> unter `findings/`:
+>
+> | Finding | Stand | Datum | Nachweis |
+> |---|---|---|---|
+> | OBS-001 | Resolved | 2026-09-27 | malkreide/fedlex-mcp#86 |
+> | SDK-003 | Logging-Teil gegenstandslos (SEP-2577), Progress offen | 2026-09-27 | malkreide/fedlex-mcp#85 |
+
 ---
 
 ## 1. Executive Summary
